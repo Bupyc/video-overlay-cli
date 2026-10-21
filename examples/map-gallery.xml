@@ -1,0 +1,5 @@
+<layout>
+  <component type="moving_map" x="24" y="24" size="256" zoom="16" corner_radius="24" />
+  <component type="journey_map" x="304" y="24" size="256" corner_radius="24" />
+  <component type="moving_journey_map" x="584" y="24" size="256" zoom="16" />
+</layout>

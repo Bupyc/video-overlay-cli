@@ -1,0 +1,103 @@
+<layout>
+    <translate x="10" y="10">
+        <component type="metric" y="0" metric="gps-dop" dp="0"/>
+        <component type="metric" y="50" metric="timestamp"/>
+        <component type="metric" y="100" metric="gps-packet" dp="0"/>
+        <component type="metric" y="150" metric="gps-packet-index" dp="0"/>
+        <component type="metric" y="200" metric="gps-lock" dp="0"/>
+    </translate>
+
+    <translate x="100" y="50">
+        <component type="gps-lock-icon" size="64"/>
+    </translate>
+
+    <translate x="1000" y="150">
+         <component type="metric" y="0" metric="cadence" units="spm" size="60" rgb="255,0,0"/>
+         <component type="metric" y="50" metric="cadence" units="rpm" size="60" rgb="255,0,0"/>
+         <component type="metric" y="100" metric="speed" units="pace_mile" format="pace" size="60" rgb="255,0,0"/>
+         <component type="metric" y="150" metric="speed" units="mph" size="60" rgb="255,0,0"/>
+    </translate>
+
+    <translate x="100" y="150">
+        <component type="zone-bar"  width="800" height="75" metric="hr" max="200" min="0" z1="130" z2="163" z3="183" z0-rgb="52, 122, 235,200" z1-rgb="67,235,52,200" z2-rgb="240,232,19,200" z3-rgb="207,19,2,200" />
+    </translate>
+
+    <translate x="300" y="150">
+        <component type="cairo-circuit-map"/>
+    </translate>
+
+    <translate x="400" y="400">
+        <translate x="150" y="150">
+            <component type="metric" metric="speed" units="mph" size="60" dp="0" rgb="255,255,255,160" outline="0,0,0,160"/>
+        </translate>
+        <component type="cairo-gauge-marker" metric="speed" units="mph" start="90"/>
+    </translate>
+
+    <translate x="600" y="400">
+        <translate x="150" y="150">
+            <component type="metric" metric="speed" units="mph" size="60" dp="0" rgb="255,255,255,160" outline="0,0,0,160"/>
+        </translate>
+        <component type="cairo-gauge-marker" metric="speed" units="mph" start="90" length="-270"/>
+    </translate>
+
+    <translate x="400" y="600">
+        <component type="cairo-gauge-round-annotated" metric="speed" units="mph" start="90"/>
+        <translate x="150" y="150">
+            <component type="metric" metric="speed" units="mph" size="60" dp="0" rgb="255,255,255,160" outline="0,0,0,160"/>
+        </translate>
+    </translate>
+
+    <translate x="400" y="300">
+        <component type="cairo-gauge-round-annotated" metric="speed" units="mph" start="90" length="-254"/>
+        <translate x="150" y="150">
+            <component type="metric" metric="speed" units="mph" size="60" dp="0" rgb="255,255,255,160" outline="0,0,0,160"/>
+        </translate>
+    </translate>
+
+    <translate x="800" y="600">
+        <component type="cairo-gauge-arc-annotated" metric="speed" units="mph" start="90" size="250"/>
+        <translate x="125" y="70">
+            <component type="metric" metric="speed" units="mph" size="100" dp="0" rgb="255,255,255,160" outline="0,0,0,160" align="centre"/>
+        </translate>
+    </translate>
+
+    <translate x="800" y="300">
+        <component type="cairo-gauge-arc-annotated" metric="speed" units="mph" start="90" length="-254" size="250"/>
+        <translate x="125" y="70">
+            <component type="metric" metric="speed" units="mph" size="100" dp="0" rgb="255,255,255,160" outline="0,0,0,160" align="centre"/>
+        </translate>
+    </translate>
+
+    <translate x="1100" y="600">
+        <component type="cairo-gauge-donut" metric="speed" units="mph" start="143" length="90" sectors="8" size="250"/>
+        <translate x="125" y="70">
+            <component type="metric" metric="speed" units="mph" size="100" dp="0" rgb="255,255,255,160" outline="0,0,0,160" align="centre"/>
+        </translate>
+    </translate>
+
+    <translate x="1100" y="300">
+        <component type="cairo-gauge-donut" metric="speed" units="mph" start="45" length="-90" sectors="8" size="250"/>
+        <translate x="125" y="70">
+            <component type="metric" metric="speed" units="mph" size="100" dp="0" rgb="255,255,255,160" outline="0,0,0,160" align="centre"/>
+        </translate>
+    </translate>
+
+    <translate y="800" x="600">
+        <component type="chart" height="200" seconds="100" samples="1024" bg="0,0,0,0" textsize="48" metric="gradient" units="none"/>
+        <component type="text" y="80" size="32" rgb="255,255,255,128">Grad(%)</component>
+    </translate>
+
+
+    <translate y="1000" x="600">
+        <component type="chart" height="200" seconds="100" samples="1024" bg="0,0,0,0" textsize="48" metric="alt" units="m"/>
+        <component type="text" y="80" size="32" rgb="255,255,255,128">Alt(m)</component>
+    </translate>
+
+    <translate y="1250" x="600">
+        <component type="chart" height="200" seconds="100" samples="1024" bg="0,0,0,0" textsize="48" metric="speed" units="mph"/>
+        <component type="text" y="80" size="32" rgb="255,255,255,128">Speed(mph)</component>
+    </translate>
+
+
+
+</layout>

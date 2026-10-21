@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<layout>
+  <composite x="40" y="35">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">TEXT</component>
+    <component type="text" y="75" size="32" outline_width="1">TRAIL</component>
+  </composite>
+  <composite x="500" y="35">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">METRIC / UNIT</component>
+    <component type="metric" y="75" metric="hr" format=".0f" size="42" outline_width="1"/>
+    <component type="metric_unit" x="92" y="75" metric="hr" size="24" outline_width="1">{}</component>
+  </composite>
+  <composite x="960" y="35">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">DATETIME</component>
+    <component type="datetime" y="75" format="%H:%M:%S" size="30" outline_width="1"/>
+  </composite>
+  <composite x="1420" y="35">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">ICON / GPS FIX</component>
+    <component type="icon" x="0" y="48" file="mountain.png" size="72"/>
+    <component type="gps_lock_icon" x="100" y="48" size="64"/>
+  </composite>
+
+  <composite x="40" y="275">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">CHART</component>
+    <component type="chart" y="45" metric="alt" width="410" height="150" seconds="300" textsize="18"/>
+  </composite>
+  <composite x="500" y="275">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">GRADIENT CHART (ALIAS)</component>
+    <component type="gradient_chart" y="45" metric="gradient" units="%" width="410" height="150" seconds="300" textsize="18"/>
+  </composite>
+  <composite x="960" y="275">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">CIRCUIT MAP</component>
+    <component type="circuit_map" y="42" size="205" fill="255,90,55,255" fill_width="4" outline_width="1"/>
+  </composite>
+  <composite x="1420" y="275">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">COMPASS</component>
+    <component type="compass" y="42" size="205" textsize="18"/>
+  </composite>
+
+  <composite x="40" y="540">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">COMPASS ARROW</component>
+    <component type="compass_arrow" y="42" size="205" textsize="22"/>
+  </composite>
+  <composite x="500" y="540">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">AIRSPEED INDICATOR</component>
+    <component type="asi" y="42" size="205" units="km/h" textsize="14"/>
+  </composite>
+  <composite x="960" y="540">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">MOTOR SPEED INDICATOR</component>
+    <component type="msi" y="42" size="205" units="km/h" textsize="14" end="100" yellow="70"/>
+  </composite>
+  <composite x="1420" y="540">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">MOTOR SPEED INDICATOR 2</component>
+    <component type="msi2" y="42" size="205" units="km/h" textsize="14" end="100" yellow="70"/>
+  </composite>
+
+  <composite x="40" y="805">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">BAR</component>
+    <component type="bar" y="65" metric="gradient" units="%" width="390" height="40" min="-20" max="20"/>
+  </composite>
+  <composite x="500" y="805">
+    <component type="text" y="25" size="20" rgb="115,205,255,255">ZONE BAR</component>
+    <component type="zone_bar" y="65" metric="hr" width="390" height="40" max="200" z1="120" z2="150" z3="175"/>
+  </composite>
+
+  <composite x="24" y="925">
+    <component type="text" y="14" size="13" rgb="115,205,255,255">CAIRO CIRCUIT</component>
+    <component type="cairo_circuit_map" y="24" size="128" line-width="0.01" loc-size="0.012"/>
+  </composite>
+  <composite x="336" y="925">
+    <component type="text" y="14" size="13" rgb="115,205,255,255">GAUGE MARKER</component>
+    <component type="cairo_gauge_marker" y="24" size="128" metric="speed" units="km/h" min="0" max="50" sectors="5"/>
+  </composite>
+  <composite x="648" y="925">
+    <component type="text" y="14" size="13" rgb="115,205,255,255">ROUND GAUGE</component>
+    <component type="cairo_gauge_round_annotated" y="24" size="128" metric="hr" units="bpm" min="0" max="200" sectors="10"/>
+  </composite>
+  <composite x="960" y="925">
+    <component type="text" y="14" size="13" rgb="115,205,255,255">ARC GAUGE</component>
+    <component type="cairo_gauge_arc_annotated" y="24" size="128" metric="speed" units="km/h" min="0" max="50" sectors="5" arc-value-lower="10" arc-value-upper="40"/>
+  </composite>
+  <composite x="1272" y="925">
+    <component type="text" y="14" size="13" rgb="115,205,255,255">DONUT GAUGE</component>
+    <component type="cairo_gauge_donut" y="24" size="128" metric="speed" units="km/h" min="0" max="50" sectors="5" arc-value-lower="10" arc-value-upper="40"/>
+  </composite>
+</layout>

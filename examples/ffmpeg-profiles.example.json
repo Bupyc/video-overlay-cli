@@ -1,0 +1,10 @@
+{
+  "hevc-alpha-high-quality": {
+    "input": [],
+    "output": ["-alpha_quality", "0.95"]
+  },
+  "vp9-alpha-high-quality": {
+    "input": [],
+    "output": ["-crf", "28"]
+  }
+}

@@ -1,0 +1,20 @@
+<layout>
+  <composite x="30" y="24" name="timer_block">
+    <component type="datetime" x="34" y="-2" format="%H:%M:%S" size="26" rgb="140,235,255,240" outline="20,80,120,180" outline_width="1"/>
+  </composite>
+  <composite x="1470" y="24" name="track_block">
+    <component type="circuit_map" size="420" fill="120,235,255,230" outline="255,255,255,120" fill_width="1" outline_width="1"/>
+  </composite>
+  <composite x="40" y="858" name="stats">
+    <component type="text" x="0" y="0" size="15" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">PWR</component>
+    <component type="metric" x="0" y="25" metric="power" units="W" format=".0f" size="34" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+    <component type="text" x="170" y="0" size="15" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">CAD</component>
+    <component type="metric" x="170" y="25" metric="cadence" format=".0f" size="34" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+    <component type="text" x="350" y="0" size="15" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">HR</component>
+    <component type="metric" x="350" y="25" metric="hr" format=".0f" size="34" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+    <component type="text" x="0" y="92" size="15" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">SPEED</component>
+    <component type="metric" x="0" y="117" metric="speed" units="km/h" format=".1f" size="34" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+    <component type="text" x="170" y="92" size="15" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">ALT</component>
+    <component type="metric" x="170" y="117" metric="alt" units="m" format=".0f" size="34" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+  </composite>
+</layout>

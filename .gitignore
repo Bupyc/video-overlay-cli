@@ -1,0 +1,5 @@
+.DS_Store
+/overlay
+/dist/
+/video-overlay-cli
+/tmp/

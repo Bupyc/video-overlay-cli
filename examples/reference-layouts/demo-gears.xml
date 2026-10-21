@@ -1,0 +1,28 @@
+<layout>
+    <translate x="16">
+
+        <translate x="50" y="500">
+            <component type="text" size="32" y="-32">Front Gear</component>
+            <component size="256" type="cairo-gauge-marker" metric="gear.front" max="2" start="90" background-rgb="0,0,0,64" gauge-rgb="255,0,0,64" dot-inner-rgb="255,0,0,128"/>
+            <translate y="70" x="128">
+                <component type="metric" metric="gear.front" align="centre" dp="0" size="120"/>
+            </translate>
+        </translate>
+
+        <translate x="450" y="500">
+            <component type="text" size="32" y="-32">Rear Gear</component>
+            <component size="256" type="cairo-gauge-marker" metric="gear.rear" max="11" start="90" background-rgb="0,0,0,64" gauge-rgb="255,0,0,64" dot-inner-rgb="255,0,0,128"/>
+            <translate y="70" x="128">
+                <component type="metric" metric="gear.rear" align="centre" dp="0" size="120"/>
+            </translate>
+        </translate>
+
+        <translate x="100" y="350">
+            <component type="chart" name="chart" units="none" metric="gear.rear" fill="177,26,22" values="false"/>
+            <translate x="230" y="40">
+                <component type="metric" metric="gear.rear" dp="0"/>
+            </translate>
+        </translate>
+
+    </translate>
+</layout>

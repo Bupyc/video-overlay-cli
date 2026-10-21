@@ -1,0 +1,135 @@
+<layout>
+
+    <!-- ВРЕМЯ / ТАЙМЕР -->
+    <composite x="30" y="24" name="timer_block">
+        <component type="datetime"
+                x="34" y="-2"
+                format="%H:%M:%S"
+                size="26"
+                rgb="140,235,255,240"
+                outline="20,80,120,180"
+                outline_width="1"/>
+    </composite>
+
+    <!-- НИТКА МАРШРУТА -->
+    <composite x="1470" y="24" name="track_block">
+        <component type="circuit_map"
+                   size="420"
+                   fill="120,235,255,230"
+                   outline="255,255,255,120"
+                   fill_width="2"
+                   outline_width="1"/>
+    </composite>
+
+    <!-- ЛЕВЫЙ НИЖНИЙ HUD-БЛОК: CHART ФОНОМ -->
+    <composite x="24" y="835" name="alt_chart_panel">
+        <component type="chart"
+                name="altitude_chart"
+                x="0"
+                y="0"
+                metric="alt"
+                units="m"
+                width="720"
+                height="235"
+                seconds="900"
+                line="210,245,255,240"
+                fill="120,130,140,75"
+                bg="0,0,0,0"
+                text="140,235,255,0"
+                textsize="12"
+                marker-size="6"
+                values="false"
+                filled="true"/>
+    </composite>
+
+    <!-- МЕТРИКИ ПОВЕРХ CHART -->
+    <composite x="58" y="850" name="left_stats">
+
+        <!-- TOP ROW -->
+        <component type="text" x="0" y="0" size="21" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">PWR</component>
+        <component type="metric" x="0" y="34" metric="power" units="W" format=".0f" size="52" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+
+        <component type="text" x="235" y="0" size="21" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">CAD</component>
+        <component type="metric" x="235" y="34" metric="cadence" format=".0f" size="52" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+
+        <component type="text" x="445" y="0" size="21" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">HR</component>
+        <component type="metric" x="445" y="34" metric="hr" format=".0f" size="52" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+
+        <!-- SECOND ROW -->
+        <component type="text" x="0" y="118" size="21" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">ALT</component>
+        <component type="metric" x="0" y="152" metric="alt" units="m" format=".0f" size="52" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+        <component type="text" x="112" y="166" size="24" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">м</component>
+
+        <!-- GEAR -->
+        <component type="text" x="360" y="118" size="21" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">GEAR</component>
+        <component type="metric" x="360" y="152" metric="gear.front" format=".0f" size="46" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+        <component type="text" x="410" y="162" size="28" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">×</component>
+        <component type="metric" x="455" y="152" metric="gear.rear" format=".0f" size="46" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+    </composite>
+
+    <!-- GRADIENT BADGE -->
+    <composite x="630" y="950" name="gradient_badge">
+        <component type="metric"
+                   x="0" y="22"
+                   metric="gradient"
+                   format=".0f"
+                   size="46"
+                   rgb="252,252,255,255"
+                   outline="0,25,55,220"
+                   outline_width="1"/>
+
+        <component type="text"
+                   x="60" y="27"
+                   size="40"
+                   rgb="90,215,255,235"
+                   outline="0,25,55,190"
+                   outline_width="1">%</component>
+    </composite>
+
+    <!-- ПРАВЫЙ НИЖНИЙ БЛОК -->
+    <composite x="1860" y="930" name="right_stats">
+
+        <!-- ДИСТАНЦИЯ -->
+        <component type="text"
+                   x="0" y="0"
+                   size="18"
+                   align="right"
+                   rgb="140,235,255,220"
+                   outline="20,80,120,180"
+                   outline_width="2">КМ</component>
+
+        <component type="metric"
+                   x="0" y="24"
+                   metric="odo"
+                   units="km"
+                   format=".1f"
+                   size="30"
+                   align="right"
+                   rgb="240,250,255,245"
+                   outline="20,80,120,180"
+                   outline_width="1"/>
+
+        <!-- СКОРОСТЬ -->
+        <component type="text"
+                   x="0" y="78"
+                   size="18"
+                   align="right"
+                   rgb="140,235,255,220"
+                   outline="20,80,120,180"
+                   outline_width="2">КМ/Ч</component>
+
+        <component type="metric"
+                   x="0" y="102"
+                   metric="speed"
+                   units="kph"
+                   format=".1f"
+                   size="36"
+                   align="right"
+                   rgb="240,250,255,245"
+                   outline="20,80,120,180"
+                   outline_width="1"/>
+
+        <!-- СРЕДНЯЯ/ДОП. СКОРОСТЬ НЕ ДОБАВЛЯЕМ, ЧТОБЫ НЕ ЗАБИВАТЬ HUD -->
+    </composite>
+
+</layout>

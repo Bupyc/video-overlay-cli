@@ -1,0 +1,153 @@
+<layout>
+    <!--    Some bundled components-->
+    <component type="chart" x="400" y="980"/>
+
+    <composite x="260" y="30" name="date_and_time">
+        <component type="datetime" x="0" y="0" format="%Y/%m/%d" size="16" align="right"/>
+        <component type="datetime" x="0" y="24" format="%H:%M:%S.%f" truncate="5" size="32" align="right"/>
+    </composite>
+
+    <composite x="1644" y="36" name="gps_info">
+        <component type="text" x="256" y="0" size="16" align="right">GPS INFO</component>
+        <component type="text" x="0" y="24" size="16" align="left">Lat: </component>
+        <component type="text" x="128" y="24" size="16" align="left">Lon: </component>
+        <component type="metric" x="118" y="24" metric="lat" dp="6" size="16" align="right" cache="False"/>
+        <component type="metric" x="256"    y="24" metric="lon" dp="6" size="16" align="right" cache="False"/>
+    </composite>
+
+    <composite x="16" y="800" name="big_mph">
+        <component type="metric_unit" metric="speed" units="speed" size="16">{:~c}</component>
+        <component type="metric" x="0" y="0" metric="speed" units="mph" dp="0" size="160" />
+    </composite>
+
+    <!-- components with metric and icon -->
+    <composite x="220" y="980" name="gradient">
+        <component type="text" x="70" y="0" size="16">SLOPE(%)</component>
+        <component type="icon" x="0" y="0" file="slope-triangle.png" size="64"/>
+        <component type="metric" x="70" y="18" metric="gradient" dp="1" size="32" />
+    </composite>
+
+    <composite x="1900" y="820" name="temperature">
+        <component type="metric_unit" x="-70" y="0" size="16" align="right" metric="temp" units="temp">TEMP({:~C})</component>
+        <component type="icon" x="-64" y="0" file="thermometer.png" size="64"/>
+        <component type="metric" x="-70" y="18" dp="0" size="32" align="right" metric="temp" units="temp"/>
+    </composite>
+
+    <composite x="1900" y="900" name="cadence">
+        <component type="text" x="-70" y="0" size="16" align="right">RPM</component>
+        <component type="icon" x="-64" y="0" file="gauge.png" size="64"/>
+        <component type="metric" x="-70" y="18" metric="cadence" dp="0" size="32" align="right"/>
+    </composite>
+
+    <composite x="1900" y="980" name="heartbeat">
+        <component type="text" x="-70" y="0" size="16" align="right">BPM</component>
+        <component type="icon" x="-64" y="0" file="heartbeat.png" size="64"/>
+        <component type="metric" x="-70" y="18" metric="hr" dp="0" size="32" align="right"/>
+    </composite>
+    <!-- see default-1920x1080.xml for these -->
+
+    <!--    Basic Components-->
+
+    <!-- Maps size=square size of map, zoom=open street map zoom level-->
+    <!-- Legacy gopro-overlay behavior: set show-attribution="false" on a map to hide the credit; OSM does not recommend omitting attribution. -->
+    <component type="moving_map" x="1644" y="100" size="256" zoom="16"/>
+    <component type="moving_map" x="1644" y="700" size="256" zoom="16" corner_radius="35" opacity="0.5"/>
+    <component type="journey_map" x="1644" y="376" size="256"/>
+    <component type="journey_map" x="1344" y="700" size="256" corner_radius="128" opacity="0.5"/>
+
+    <!--    Static Text-->
+    <component type="text" x="800" y="480" size="32" rgb="255,255,0">(C) Some Copyright Message</component>
+    <component type="text" x="800" y="480" size="48" align="right">(C) Some Copyright Message</component>
+
+    <component type="text" x="1400" y="150" size="32" align="lt" direction="ttb" rgb="0,255,255">Vertical Message</component>
+
+    <!--  Some metric from the gopro data or calculated from it -->
+    <!-- supported metrics: 'hr', 'speed', 'temp', 'gradient', 'alt', 'lat', 'lon', 'odo', "dist", "azi" -->
+    <!-- odo = odometer - total distance travelled, dist = dist from last point, azi = azimuth/heading -->
+    <!-- supported units: mph, kph, mps, knots, miles, nautical_miles, degreeF, degreeC -->
+    <!-- use 'format' for python format string, or 'dp' to give # of decimal places -->
+    <!-- consider use 'cache' False for values that change a lot, and don't have a fixed set of values, e.g. lat/lon -->
+    <component type="metric" x="800" y="600" metric="speed" format=".1f" size="32"/>
+    <component type="metric" x="900" y="600" metric="speed" units="mph" format=".1f" size="32"/>
+    <component type="metric" x="1000" y="600" metric="speed" units="kph" format=".1f" size="32"/>
+    <component type="metric" x="1100" y="600" metric="speed" units="mps" format=".1f" size="32"/>
+    <component type="metric" x="1200" y="600" metric="speed" units="knots" format=".1f" size="32"/>
+
+    <component type="metric" x="800" y="650" metric="hr" format=".4f" size="32" align="right"/>
+    <component type="metric" x="850" y="700" metric="hr" dp="5" size="32"/>
+
+    <component type="metric" x="850" y="750" metric="odo" units="miles" dp="2" size="32" rgb="255,255,0"/>
+    <component type="metric" x="950" y="750" metric="odo" units="km" dp="2" size="32" rgb="255,255,0"/>
+
+    <component type="metric" x="1050" y="750" metric="power" units="W" dp="2" size="32" rgb="255,255,0"/>
+    <component type="metric" x="1050" y="800" metric="power" units="kW" dp="2" size="32" rgb="255,255,0"/>
+
+    <composite name="metrics" x="250" y="300">
+        <component type="metric" x="0" y="0" metric="alt" dp="1" size="32"/>
+        <component type="metric" x="0" y="50" metric="alt" units="feet" dp="1" size="32"/>
+        <component type="metric" x="0" y="100" metric="alt" units="miles" dp="1" size="32"/>
+        <component type="metric" x="0" y="150" metric="alt" units="nautical_miles" dp="1" size="32"/>
+    </composite>
+
+    <component type="metric" x="250" y="700" metric="lat" dp="5" size="32" cache="False"/>
+    <component type="metric" x="250" y="750" metric="lon" dp="5" size="32" cache="False"/>
+
+    <component type="metric" x="950" y="50" metric="accl.x" units="gravity" dp="2" size="32" rgb="255,0,255"/>
+    <component type="metric" x="1000" y="50" metric="accl.y" units="G" dp="2" size="32" rgb="255,0,255"/>
+    <component type="metric" x="1050" y="50" metric="accl.z" units="G" dp="2" size="32" rgb="255,0,255"/>
+
+    <component type="metric" x="950" y="150" metric="grav.x" dp="2" size="32" rgb="255,255,0"/>
+    <component type="metric" x="1000" y="150" metric="grav.y" dp="2" size="32" rgb="255,255,0"/>
+    <component type="metric" x="1050" y="150" metric="grav.z" dp="2" size="32" rgb="255,255,0"/>
+
+    <!-- Bar / Acceleration -->
+    <translate x="50" y="550">
+        <component type="bar" width="400" height="50" metric="accl.x" outline="0,0,0,0" fill="255,0,255"/>
+    </translate>
+
+    <translate x="50" y="600">
+        <component type="bar" width="400" height="50" metric="accl.y" units="G"/>
+    </translate>
+
+    <!--    Date and time-->
+    <component type="datetime" x="1000" y="250" format="%Y/%m/%d" size="32" />
+    <component type="datetime" x="1000" y="300" format="%H:%M:%S.%f" size="32" cache="False"/>
+    <component type="datetime" x="1000" y="350" format="%H:%M:%S.%f" size="32" truncate="4"/>
+
+    <!--  icon  (bundled icons are actually black, so need invert to be white )-->
+    <composite name="icons" x="64" y="100">
+        <component type="icon" x="0" y="0" file="mountain.png" size="128"/>
+        <component type="icon" x="192" y="0" file="mountain.png" size="128" invert="False"/>
+    </composite>
+    <!-- icon somewhere on filesystem -->
+    <!--    <component type="icon" x="64" y="100" file="icons/custom.png" size="128"/>-->
+
+    <translate x="150" y="150">
+        <frame width="150" height="150" outline="255,255,0" opacity="0.6">
+            <component type="moving_map" x="0" y="0" size="256" zoom="16"/>
+        </frame>
+    </translate>
+
+    <translate x="250" y="250">
+        <component type="cairo_circuit_map" size="512"/>
+    </translate>
+
+    <composite name="compass" x="500" y="100">
+        <component type="compass" size="300" bg="0,0,0,128" fg="255,255,255" text="0,255,255" textsize="16"/>
+
+        <translate x="180">
+            <component type="compass" size="300" fg="255,255,255" text="0,255,255" textsize="32"/>
+        </translate>
+
+        <translate x="350">
+            <component type="compass-arrow" size="200" bg="0,0,0,0" arrow="255,0,255" text="0,0,0" textsize="32"/>
+        </translate>
+    </composite>
+
+    <translate x="700" y="800">
+        <component type="asi" vs0="10"/>
+        <translate x="256">
+            <component type="asi" vs0="10" rotate="180"/>
+        </translate>
+    </translate>
+</layout>
