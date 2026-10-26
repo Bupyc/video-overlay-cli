@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tdewolff/canvas"
@@ -46,6 +47,14 @@ type Renderer struct {
 	drawer    Drawer
 }
 
+type FrameBuffer struct {
+	rgba        *image.RGBA
+	rasterizer  *rasterizer.Rasterizer
+	canvas      *canvas.Context
+	drawContext Context
+	pathFill    *pathFillRenderer
+}
+
 func New(opts Options, doc *layout.Document, a *activity.Activity, registry Registry) (*Renderer, error) {
 	workers, err := NewWorkers(opts, doc, a, registry, 1)
 	if err != nil {
@@ -62,7 +71,7 @@ func NewWorkers(opts Options, doc *layout.Document, a *activity.Activity, regist
 	if workerCount > maxInt/maxTextCacheItems {
 		return nil, fmt.Errorf("worker count is too large")
 	}
-	r, err := newRenderer(opts, doc, a, registry, maxTextCacheItems*workerCount)
+	r, err := newRenderer(opts, doc, a, registry, min(maxTextCacheItems*workerCount, maxSharedTextCacheItems))
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +118,7 @@ func newRenderer(opts Options, doc *layout.Document, a *activity.Activity, regis
 	if err != nil {
 		return nil, err
 	}
-	textCache := &textCache{items: make(map[string]*cachedTextImage), building: make(map[string]*textImageBuild), maxItems: textCacheLimit}
+	textCache := &textCache{items: make(map[textImageCacheKey]*cachedTextImage), building: make(map[textImageCacheKey]*textImageBuild), maxItems: textCacheLimit}
 	setup := &Context{
 		Activity: a, Sample: a.Samples[0], Size: image.Pt(opts.Width, opts.Height), FontPath: opts.FontPath,
 		Fonts: fonts, textCache: textCache, AssetDir: opts.AssetDir,
@@ -131,7 +140,8 @@ func (r *Renderer) FrameAtContext(mapContext context.Context, at time.Duration) 
 		return nil, fmt.Errorf("frame time %s is outside activity duration", at)
 	}
 	frame := image.NewRGBA(image.Rect(0, 0, r.opts.Width, r.opts.Height))
-	if err := r.renderIntoContext(mapContext, at, frame, false); err != nil {
+	var drawContext Context
+	if err := r.renderIntoContext(mapContext, at, frame, false, nil, nil, nil, false, &drawContext); err != nil {
 		return nil, err
 	}
 	return frame, nil
@@ -141,10 +151,52 @@ func (r *Renderer) FrameAtContextInto(mapContext context.Context, at time.Durati
 	if at < 0 || at > r.activity.End.Sub(r.activity.Start) {
 		return fmt.Errorf("frame time %s is outside activity duration", at)
 	}
-	return r.renderIntoContext(mapContext, at, frame, true)
+	var drawContext Context
+	return r.renderIntoContext(mapContext, at, frame, true, nil, nil, nil, false, &drawContext)
 }
 
-func (r *Renderer) renderIntoContext(mapContext context.Context, at time.Duration, frame *image.RGBA, reset bool) error {
+func (r *Renderer) NewFrameBuffer() *FrameBuffer {
+	frame := image.NewRGBA(image.Rect(0, 0, r.opts.Width, r.opts.Height))
+	return &FrameBuffer{rgba: frame, pathFill: newPathFillRenderer(frame)}
+}
+
+func (f *FrameBuffer) RGBA() *image.RGBA {
+	return f.rgba
+}
+
+func (r *Renderer) FrameAtContextIntoBuffer(mapContext context.Context, at time.Duration, frame *FrameBuffer) error {
+	return r.frameAtContextIntoBuffer(mapContext, at, frame, false)
+}
+
+// FrameAtContextIntoBufferForYUV420P skips opaque alpha initialization because YUV420P discards alpha.
+func (r *Renderer) FrameAtContextIntoBufferForYUV420P(mapContext context.Context, at time.Duration, frame *FrameBuffer) error {
+	if r.opts.Background != Black {
+		return fmt.Errorf("YUV420P frame rendering requires a black background")
+	}
+	return r.frameAtContextIntoBuffer(mapContext, at, frame, true)
+}
+
+func (r *Renderer) frameAtContextIntoBuffer(mapContext context.Context, at time.Duration, frame *FrameBuffer, transparentBlack bool) error {
+	if at < 0 || at > r.activity.End.Sub(r.activity.Start) {
+		return fmt.Errorf("frame time %s is outside activity duration", at)
+	}
+	if frame == nil || frame.rgba == nil || frame.rgba.Bounds() != image.Rect(0, 0, r.opts.Width, r.opts.Height) {
+		return fmt.Errorf("frame buffer bounds do not match renderer size %dx%d", r.opts.Width, r.opts.Height)
+	}
+	if frame.rasterizer == nil {
+		frame.rasterizer = rasterizer.FromImage(frame.rgba, canvas.DPMM(1), nil)
+	}
+	if frame.canvas == nil {
+		frame.canvas = canvas.NewContext(frame.rasterizer)
+	}
+	if err := r.renderIntoContext(mapContext, at, frame.rgba, true, frame.rasterizer, frame.canvas, frame.pathFill, transparentBlack, &frame.drawContext); err != nil {
+		frame.canvas = nil
+		return err
+	}
+	return nil
+}
+
+func (r *Renderer) renderIntoContext(mapContext context.Context, at time.Duration, frame *image.RGBA, reset bool, raster *rasterizer.Rasterizer, canvasContext *canvas.Context, pathFill *pathFillRenderer, transparentBlack bool, drawContext *Context) error {
 	if frame == nil || frame.Bounds() != image.Rect(0, 0, r.opts.Width, r.opts.Height) {
 		return fmt.Errorf("frame buffer bounds do not match renderer size %dx%d", r.opts.Width, r.opts.Height)
 	}
@@ -152,13 +204,30 @@ func (r *Renderer) renderIntoContext(mapContext context.Context, at time.Duratio
 		clear(frame.Pix)
 	}
 	if r.opts.Background == Black {
-		draw.Draw(frame, frame.Bounds(), image.NewUniform(color.RGBA{A: 255}), image.Point{}, draw.Src)
+		if transparentBlack {
+			clear(frame.Pix)
+		} else {
+			draw.Draw(frame, frame.Bounds(), image.NewUniform(color.RGBA{A: 255}), image.Point{}, draw.Src)
+		}
 	}
 	if mapContext == nil {
 		mapContext = r.opts.MapContext
 	}
-	raster := rasterizer.FromImage(frame, canvas.DPMM(1), nil)
-	context := &Context{
+	if raster == nil {
+		raster = rasterizer.FromImage(frame, canvas.DPMM(1), nil)
+	}
+	if canvasContext == nil {
+		canvasContext = canvas.NewContext(raster)
+	} else {
+		canvasContext.SetFillColor(color.RGBA{})
+		canvasContext.SetStrokeColor(color.RGBA{})
+		canvasContext.Fill()
+		canvasContext.ResetStyle()
+		canvasContext.ResetView()
+		canvasContext.SetCoordView(canvas.Identity)
+		canvasContext.SetCoordSystem(canvas.CartesianIV)
+	}
+	*drawContext = Context{
 		At:         at,
 		Activity:   r.activity,
 		Sample:     sampleAt(r.activity, r.activity.Start.Add(at)),
@@ -170,12 +239,13 @@ func (r *Renderer) renderIntoContext(mapContext context.Context, at time.Duratio
 		MapContext: mapContext,
 		MapConfig:  r.opts.MapConfig,
 		Privacy:    r.opts.Privacy,
-		Canvas:     canvas.NewContext(raster),
+		Canvas:     canvasContext,
 		frame:      frame,
 		opaque:     r.opts.Background == Black,
+		pathFill:   pathFill,
 	}
-	context.Canvas.SetCoordSystem(canvas.CartesianIV)
-	if err := r.drawer(context); err != nil {
+	drawContext.Canvas.SetCoordSystem(canvas.CartesianIV)
+	if err := r.drawer(drawContext); err != nil {
 		raster.Close()
 		return err
 	}
@@ -299,38 +369,48 @@ func prepareFrame(element *layout.Element, registry Registry, setup *Context) (D
 	}
 	maskPixels := frameMask(width, height, radius, fade, opacity)
 	mask := &image.Alpha{Pix: maskPixels, Stride: width, Rect: image.Rect(0, 0, width, height)}
+	type frameScratch struct {
+		image      *image.RGBA
+		rasterizer *rasterizer.Rasterizer
+	}
+	var scratchPool sync.Pool
+	scratchPool.New = func() any {
+		frameImage := image.NewRGBA(image.Rect(0, 0, width, height))
+		return &frameScratch{image: frameImage, rasterizer: rasterizer.FromImage(frameImage, canvas.DPMM(1), nil)}
+	}
 	return func(ctx *Context) error {
-		image := image.NewRGBA(image.Rect(0, 0, width, height))
-		raster := rasterizer.FromImage(image, canvas.DPMM(1), nil)
+		scratch := scratchPool.Get().(*frameScratch)
+		defer scratchPool.Put(scratch)
+		clear(scratch.image.Pix)
 		frameContext := *ctx
-		frameContext.Canvas = canvas.NewContext(raster)
+		frameContext.Canvas = canvas.NewContext(scratch.rasterizer)
 		frameContext.Canvas.SetCoordSystem(canvas.CartesianIV)
-		frameContext.Size = image.Bounds().Size()
+		frameContext.Size = scratch.image.Bounds().Size()
 		if fill != nil {
 			drawRect(frameContext.Canvas, 0, 0, float64(width), float64(height), float64(radius), *fill)
 		}
 		if err := drawChildren(&frameContext, children); err != nil {
-			raster.Close()
+			scratch.rasterizer.Close()
 			return err
 		}
 		if outline != nil {
 			drawRoundedOutline(frameContext.Canvas, float64(width), float64(height), float64(radius), *outline)
 		}
-		raster.Close()
-		if ctx.DrawCachedImageWithMask(x, y, image, mask) {
+		scratch.rasterizer.Close()
+		if ctx.DrawCachedImageWithMask(x, y, scratch.image, mask) {
 			return nil
 		}
 		for y := 0; y < height; y++ {
 			for x := 0; x < width; x++ {
-				pixel := image.PixOffset(x, y)
+				pixel := scratch.image.PixOffset(x, y)
 				factor := uint16(maskPixels[y*width+x])
-				image.Pix[pixel] = uint8(uint16(image.Pix[pixel]) * factor / 255)
-				image.Pix[pixel+1] = uint8(uint16(image.Pix[pixel+1]) * factor / 255)
-				image.Pix[pixel+2] = uint8(uint16(image.Pix[pixel+2]) * factor / 255)
-				image.Pix[pixel+3] = uint8(uint16(image.Pix[pixel+3]) * factor / 255)
+				scratch.image.Pix[pixel] = uint8(uint16(scratch.image.Pix[pixel]) * factor / 255)
+				scratch.image.Pix[pixel+1] = uint8(uint16(scratch.image.Pix[pixel+1]) * factor / 255)
+				scratch.image.Pix[pixel+2] = uint8(uint16(scratch.image.Pix[pixel+2]) * factor / 255)
+				scratch.image.Pix[pixel+3] = uint8(uint16(scratch.image.Pix[pixel+3]) * factor / 255)
 			}
 		}
-		ctx.Canvas.DrawImage(x, y, image, canvas.DPMM(1))
+		ctx.Canvas.DrawImage(x, y, scratch.image, canvas.DPMM(1))
 		return nil
 	}, nil
 }

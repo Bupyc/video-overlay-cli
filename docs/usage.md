@@ -19,6 +19,8 @@ The CLI renders frames in Go and streams them to FFmpeg for encoding. With `--vi
 ## Export a standalone overlay
 
 Overlay-only export is the default. It renders the activity duration without opening a source video.
+Without overrides, output is 1920×1080 at 10 fps with a black background and the `black-h264` profile.
+Worker count defaults to automatic, capped at 4 or the available `GOMAXPROCS` value, whichever is lower. Set `--workers N` to override the cap.
 
 ```sh
 ./video-overlay-cli render \

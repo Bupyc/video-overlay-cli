@@ -17,8 +17,8 @@
                    size="420"
                    fill="120,235,255,230"
                    outline="255,255,255,120"
-                   fill_width="1"
-                   outline_width="1"/>
+                   fill_width="2"
+                   outline_width="2"/>
     </composite>
 
     <!-- ЛЕВЫЙ НИЖНИЙ HUD-БЛОК: БЕГОВОЙ ВАРИАНТ, CHART ФОНОМ -->
@@ -31,7 +31,7 @@
                 units="m"
                 width="560"
                 height="132"
-                seconds="900"
+                distance="2km"
                 line="210,245,255,240"
                 fill="120,130,140,75"
                 bg="0,0,0,0"
@@ -51,7 +51,7 @@
         <component type="text" x="78" y="35" size="16" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">W</component>
 
         <component type="text" x="170" y="0" size="15" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">CAD</component>
-        <component type="metric" x="170" y="25" metric="cadence" format=".0f" size="34" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+        <component type="metric" x="170" y="25" metric="running_cadence" format=".0f" size="34" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
         <component type="text" x="240" y="35" size="16" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">spm</component>
 
         <component type="text" x="350" y="0" size="15" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">HR</component>
@@ -66,6 +66,10 @@
         <component type="text" x="170" y="92" size="15" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">ALT</component>
         <component type="metric" x="170" y="117" metric="alt" units="m" format=".0f" size="34" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
         <component type="text" x="240" y="127" size="16" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">м</component>
+
+        <component type="text" x="350" y="92" size="15" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">VSPD</component>
+        <component type="metric" x="350" y="117" metric="vertical_speed" units="m/h" format=".0f" size="34" rgb="252,252,255,255" outline="0,25,55,220" outline_width="1"/>
+        <component type="text" x="438" y="127" size="16" rgb="90,215,255,235" outline="0,25,55,190" outline_width="1">м/ч</component>
     </composite>
 
     <!-- GRADE BADGE: компактнее, чем в вело-версии -->

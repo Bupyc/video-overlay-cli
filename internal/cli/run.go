@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"image"
 	"io"
 	"math"
 	"os"
@@ -44,15 +43,15 @@ func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	flags := flag.NewFlagSet("render", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() {
-		fmt.Fprint(stdout, "Usage: video-overlay-cli render [options]\n\nOptions:\n  --activity PATH       FIT or GPX activity file\n  --layout PATH         XML overlay layout\n  --output PATH         output video path\n  --size WxH            frame size (default 1920x1080)\n  --fps N               output frame rate (default 10)\n  --background MODE     transparent or black (default transparent)\n  --profile NAME        alpha-prores, alpha-hevc, alpha-vp9, or black-h264\n  --ffmpeg-profile NAME named profile from ffmpeg-profiles.json\n  --ffmpeg-profiles PATH profile file (default user config/video-overlay-cli)\n  --ffmpeg-arg ARG      extra output argument; repeat to pass multiple values\n  --workers N           max render workers (default auto)\n  --font PATH           font file\n  --ffmpeg PATH         ffmpeg executable (default ffmpeg)\n  --video PATH          optional source video for composition\n  --video-offset SEC    overlay start offset in source-video seconds (default 0)\n  --privacy LAT,LON,KM  hide map details within this radius\n  --tile-url TEMPLATE  tile URL with {z}, {x}, {y} placeholders\n  --tile-cache PATH     persistent map tile cache (default OS cache dir)\n  --tile-attribution T  attribution text shown on map widgets\n")
+		fmt.Fprint(stdout, "Usage: video-overlay-cli render [options]\n\nOptions:\n  --activity PATH       FIT or GPX activity file\n  --layout PATH         XML overlay layout\n  --output PATH         output video path\n  --size WxH            frame size (default 1920x1080)\n  --fps N               output frame rate (default 10)\n  --background MODE     transparent or black (default black)\n  --profile NAME        alpha-prores, alpha-hevc, alpha-vp9, or black-h264 (default black-h264)\n  --ffmpeg-profile NAME named profile from ffmpeg-profiles.json\n  --ffmpeg-profiles PATH profile file (default user config/video-overlay-cli)\n  --ffmpeg-arg ARG      extra output argument; repeat to pass multiple values\n  --workers N           max render workers (default up to 4, limited by GOMAXPROCS)\n  --font PATH           font file\n  --ffmpeg PATH         ffmpeg executable (default ffmpeg)\n  --video PATH          optional source video for composition\n  --video-offset SEC    overlay start offset in seconds (default 0)\n  --privacy LAT,LON,KM  hide map details within a radius\n  --tile-url TEMPLATE  tile URL with {z}, {x}, {y} placeholders\n  --tile-cache PATH     persistent map tile cache (default OS cache dir)\n  --tile-attribution T  attribution text shown on map widgets\n")
 	}
 	activityPath := flags.String("activity", "", "FIT or GPX activity file")
 	layoutPath := flags.String("layout", "", "XML overlay layout")
 	outputPath := flags.String("output", "", "output video path")
 	size := flags.String("size", "1920x1080", "frame size")
 	fps := flags.Float64("fps", 10, "output frame rate")
-	background := flags.String("background", "transparent", "transparent or black")
-	profile := flags.String("profile", "alpha-prores", "alpha-prores, alpha-hevc, alpha-vp9, or black-h264")
+	background := flags.String("background", "black", "transparent or black")
+	profile := flags.String("profile", "black-h264", "alpha-prores, alpha-hevc, alpha-vp9, or black-h264")
 	ffmpegProfileName := flags.String("ffmpeg-profile", "", "named profile from ffmpeg-profiles.json")
 	ffmpegProfilesPath := flags.String("ffmpeg-profiles", "", "FFmpeg profile JSON path (default user config/video-overlay-cli)")
 	var ffmpegArgs stringListFlag
@@ -292,7 +291,8 @@ func validateOutputPath(output string, inputs ...string) error {
 
 type frameResult struct {
 	index int
-	frame *image.RGBA
+	frame *render.FrameBuffer
+	yuv   []byte
 	err   error
 }
 
@@ -307,6 +307,10 @@ type frameResultBatch struct {
 }
 
 const frameBatchSize = 4
+
+func frameBatchCount(frames int) int {
+	return frames / frameBatchSize
+}
 
 // shortcut: four batches saturated the measured ProRes pipe; increase if other hardware or encoders starve.
 const maxTransparentFramesInFlight = frameBatchSize * 4
@@ -418,21 +422,52 @@ func streamFrames(ctx context.Context, encoder *encode.Encoder, renderers []*ren
 	}
 	var windowLimit atomic.Int64
 	windowLimit.Store(int64(window))
-	framePool := sync.Pool{New: func() any { return image.NewRGBA(image.Rect(0, 0, width, height)) }}
+	framePool := make(chan *render.FrameBuffer, maxWindow)
+	getFrame := func() *render.FrameBuffer {
+		select {
+		case frame := <-framePool:
+			return frame
+		default:
+			return renderers[0].NewFrameBuffer()
+		}
+	}
+	putFrame := func(frame *render.FrameBuffer) {
+		if frame != nil {
+			framePool <- frame
+		}
+	}
+	var yuvPool chan []byte
+	if useYUV420P {
+		yuvPool = make(chan []byte, maxWindow)
+	}
+	getYUV := func() []byte {
+		select {
+		case frame := <-yuvPool:
+			return frame
+		default:
+			return make([]byte, width*height*3/2)
+		}
+	}
+	putYUV := func(frame []byte) {
+		if frame != nil {
+			yuvPool <- frame
+		}
+	}
 	jobs := make(chan frameJob, workers)
 	results := make(chan frameResultBatch, workers)
-	slots := make(chan struct{}, maxWindow)
-	writeQueue := make(chan *image.RGBA, maxWindow)
+	batchSlots := make(chan struct{}, frameBatchCount(maxWindow))
+	writeQueue := make(chan frameResult, maxWindow)
 	slotWake := make(chan struct{}, 1)
 	writerDone := make(chan error, 1)
 	var writerIdleNanos atomic.Int64
 	go func() {
 		var writeErr error
+		framesSinceSlotRelease := 0
 		trackWriterIdle := frameWindow != nil && frameWindow.maximum > frameBatchSize
 		hasWrittenFrame := false
 		for {
 			waitStarted := time.Now()
-			frame, ok := <-writeQueue
+			result, ok := <-writeQueue
 			if trackWriterIdle && hasWrittenFrame {
 				writerIdleNanos.Add(time.Since(waitStarted).Nanoseconds())
 			}
@@ -441,23 +476,28 @@ func streamFrames(ctx context.Context, encoder *encode.Encoder, renderers []*ren
 			}
 			if writeErr == nil {
 				if useYUV420P {
-					writeErr = encoder.WriteYUV420P(frame.Pix[:width*height*3/2])
+					writeErr = encoder.WriteYUV420P(result.yuv)
 				} else {
-					writeErr = encoder.WriteFrame(frame)
+					writeErr = encoder.WriteFrame(result.frame.RGBA())
 				}
 				if writeErr != nil {
 					cancel()
 				} else {
-					writtenFrames.Add(1)
+					completed := writtenFrames.Add(1)
 					hasWrittenFrame = true
-					<-slots
-					select {
-					case slotWake <- struct{}{}:
-					default:
+					framesSinceSlotRelease++
+					if framesSinceSlotRelease == frameBatchSize || completed == int64(frames) {
+						<-batchSlots
+						framesSinceSlotRelease = 0
+						select {
+						case slotWake <- struct{}{}:
+						default:
+						}
 					}
 				}
 			}
-			framePool.Put(frame)
+			putFrame(result.frame)
+			putYUV(result.yuv)
 		}
 		if showProgress {
 			close(progressDone)
@@ -482,7 +522,7 @@ func streamFrames(ctx context.Context, encoder *encode.Encoder, renderers []*ren
 					}
 					current := int(windowLimit.Load())
 					writerIdle := time.Duration(writerIdleNanos.Swap(0))
-					backlogged := len(writeQueue) > 0 && len(slots) >= current
+					backlogged := len(writeQueue) > 0 && len(batchSlots)*frameBatchSize >= current
 					if next := frameWindow.observe(writerIdle, backlogged); next != current {
 						windowLimit.Store(int64(next))
 						select {
@@ -503,32 +543,42 @@ func streamFrames(ctx context.Context, encoder *encode.Encoder, renderers []*ren
 		wait.Add(1)
 		go func(renderer *render.Renderer) {
 			defer wait.Done()
-			var pixelScratch []byte
-			if useYUV420P {
-				pixelScratch = make([]byte, width*height/2+width)
-			}
 			for job := range jobs {
 				batch := frameResultBatch{}
 				for i := 0; i < job.count; i++ {
 					index := job.first + i
 					at := time.Duration(float64(index) * float64(time.Second) / fps)
-					frame := framePool.Get().(*image.RGBA)
-					err := renderer.FrameAtContextInto(workCtx, at, frame)
+					frame := getFrame()
+					var yuv []byte
+					var err error
+					if useYUV420P {
+						err = renderer.FrameAtContextIntoBufferForYUV420P(workCtx, at, frame)
+					} else {
+						err = renderer.FrameAtContextIntoBuffer(workCtx, at, frame)
+					}
 					if err == nil {
 						if useYUV420P {
-							err = rgbaToYUV420PInPlace(frame, pixelScratch)
+							yuv = getYUV()
+							err = rgbaToYUV420P(frame.RGBA(), yuv)
+							putFrame(frame)
+							frame = nil
+							if err != nil {
+								putYUV(yuv)
+								yuv = nil
+							}
 						} else if useBGRA {
-							err = rgbaToBGRAInPlace(frame)
+							err = rgbaToBGRAInPlace(frame.RGBA())
 						}
 					}
-					batch.frames[i] = frameResult{index: index, frame: frame, err: err}
+					batch.frames[i] = frameResult{index: index, frame: frame, yuv: yuv, err: err}
 					batch.count++
 				}
 				select {
 				case results <- batch:
 				case <-workCtx.Done():
 					for _, result := range batch.frames[:batch.count] {
-						framePool.Put(result.frame)
+						putFrame(result.frame)
+						putYUV(result.yuv)
 					}
 					return
 				}
@@ -539,17 +589,15 @@ func streamFrames(ctx context.Context, encoder *encode.Encoder, renderers []*ren
 		defer close(jobs)
 		for first := 0; first < frames; first += frameBatchSize {
 			count := min(frameBatchSize, frames-first)
-			for i := 0; i < count; i++ {
-				for {
-					if len(slots) < int(windowLimit.Load()) {
-						slots <- struct{}{}
-						break
-					}
-					select {
-					case <-slotWake:
-					case <-workCtx.Done():
-						return
-					}
+			for {
+				if len(batchSlots) < frameBatchCount(int(windowLimit.Load())) {
+					batchSlots <- struct{}{}
+					break
+				}
+				select {
+				case <-slotWake:
+				case <-workCtx.Done():
+					return
 				}
 			}
 			select {
@@ -564,13 +612,14 @@ func streamFrames(ctx context.Context, encoder *encode.Encoder, renderers []*ren
 		close(results)
 	}()
 
-	pending := make(map[int]*image.RGBA, maxWindow)
+	pending := make(map[int]frameResult, maxWindow)
 	next := 0
 	var firstErr error
 	for batch := range results {
 		for _, result := range batch.frames[:batch.count] {
 			if result.err != nil {
-				framePool.Put(result.frame)
+				putFrame(result.frame)
+				putYUV(result.yuv)
 				if firstErr == nil {
 					firstErr = result.err
 					cancel()
@@ -578,10 +627,11 @@ func streamFrames(ctx context.Context, encoder *encode.Encoder, renderers []*ren
 				continue
 			}
 			if firstErr != nil {
-				framePool.Put(result.frame)
+				putFrame(result.frame)
+				putYUV(result.yuv)
 				continue
 			}
-			pending[result.index] = result.frame
+			pending[result.index] = result
 			for {
 				frame, ok := pending[next]
 				if !ok {
@@ -593,8 +643,9 @@ func streamFrames(ctx context.Context, encoder *encode.Encoder, renderers []*ren
 			}
 		}
 	}
-	for _, frame := range pending {
-		framePool.Put(frame)
+	for _, result := range pending {
+		putFrame(result.frame)
+		putYUV(result.yuv)
 	}
 	close(writeQueue)
 	if tuneStop != nil {
@@ -642,7 +693,8 @@ func renderWorkerCount(requested int) int {
 	if requested > 0 {
 		return requested
 	}
-	return min(12, runtime.GOMAXPROCS(0))
+	// shortcut: auto caps at 4 for the measured pipe-bound render; raise it if another workload benefits from more workers.
+	return min(4, runtime.GOMAXPROCS(0))
 }
 
 func parseSize(value string) (int, int, error) {

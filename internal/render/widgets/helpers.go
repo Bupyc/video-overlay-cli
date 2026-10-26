@@ -100,15 +100,6 @@ type textLookahead func(*render.Context, string, <-chan struct{}, func(string) b
 
 const maxTextLookahead = 5
 
-func drawTextAtAscender(ctx *render.Context, x, y, size float64, text, align string, fill, outline color.RGBA, outlineWidth float64, cache bool) {
-	drawTextAtAscenderWithLookahead(ctx, x, y, size, text, align, fill, outline, outlineWidth, cache, nil)
-}
-
-func drawTextAtAscenderWithLookahead(ctx *render.Context, x, y, size float64, text, align string, fill, outline color.RGBA, outlineWidth float64, cache bool, lookahead textLookahead) {
-	ascent := ctx.Fonts.Face(size*72/25.4, nrgba(fill)).Metrics().Ascent
-	drawTextWithLookahead(ctx, x, y+ascent, size, text, align, fill, outline, outlineWidth, cache, lookahead)
-}
-
 func drawTextWithCache(ctx *render.Context, x, y, size float64, text, align string, fill, outline color.RGBA, outlineWidth float64, cache bool) {
 	drawTextWithLookahead(ctx, x, y, size, text, align, fill, outline, outlineWidth, cache, nil)
 }
@@ -118,17 +109,8 @@ func drawTextWithLookahead(ctx *render.Context, x, y, size float64, text, align 
 		return
 	}
 	textAlign := canvasTextAlign(align)
-	ctx.Canvas.Push()
-	defer ctx.Canvas.Pop()
-	buildText := func(value string) *canvas.Text {
-		face := ctx.Fonts.Face(size*72/25.4, nrgba(fill))
-		if outlineWidth > 0 && outline.A > 0 {
-			face = ctx.Fonts.Face(size*72/25.4, nrgba(fill), canvas.FontStroke(outlineWidth, nrgba(outline)))
-		}
-		return canvas.NewTextLine(face, value, textAlign)
-	}
 	if !cache {
-		line := buildText(text)
+		line := newTextLine(ctx, size, text, textAlign, fill, outline, outlineWidth)
 		xFraction, yFraction := fractional(x), fractional(y)
 		if bitmap, offset, ok := rasterizeTextGlyphs(ctx, line, xFraction, yFraction, fill, outline, outlineWidth); ok {
 			drawTextBitmap(ctx, bitmap, image.Pt(int(math.Floor(x))+offset.X, int(math.Floor(y))+offset.Y))
@@ -140,20 +122,24 @@ func drawTextWithLookahead(ctx *render.Context, x, y, size float64, text, align 
 	xFraction := x - math.Floor(x)
 	yFraction := y - math.Floor(y)
 	key := textImageKey(size, text, align, fill, outline, outlineWidth, xFraction, yFraction)
+	if bitmap, offset, ok := ctx.LookupCachedTextImageByKey(key); ok {
+		drawTextBitmap(ctx, bitmap, image.Pt(int(math.Floor(x))+offset.X, int(math.Floor(y))+offset.Y))
+		return
+	}
 	build := func() (*image.RGBA, image.Point) {
-		return rasterizeText(ctx, buildText(text), xFraction, yFraction, fill, outline, outlineWidth)
+		return rasterizeText(ctx, newTextLine(ctx, size, text, textAlign, fill, outline, outlineWidth), xFraction, yFraction, fill, outline, outlineWidth)
 	}
 	var bitmap *image.RGBA
 	var offset image.Point
 	if lookahead == nil {
-		bitmap, offset = ctx.CachedTextImage(key, build)
+		bitmap, offset = ctx.CachedTextImageByKey(key, build)
 	} else {
-		bitmap, offset = ctx.CachedTextImageWithLookahead(key, build, func(done <-chan struct{}, prefetch func(string, func() (*image.RGBA, image.Point)) bool) {
+		bitmap, offset = ctx.CachedTextImageByKeyWithLookahead(key, build, func(done <-chan struct{}, prefetch func(render.TextImageCacheKey, func() (*image.RGBA, image.Point)) bool) {
 			lookahead(ctx, text, done, func(value string) bool {
 				if value != "" && value != text {
 					futureKey := textImageKey(size, value, align, fill, outline, outlineWidth, xFraction, yFraction)
 					return prefetch(futureKey, func() (*image.RGBA, image.Point) {
-						return rasterizeText(ctx, buildText(value), xFraction, yFraction, fill, outline, outlineWidth)
+						return rasterizeText(ctx, newTextLine(ctx, size, value, textAlign, fill, outline, outlineWidth), xFraction, yFraction, fill, outline, outlineWidth)
 					})
 				}
 				return false
@@ -161,6 +147,14 @@ func drawTextWithLookahead(ctx *render.Context, x, y, size float64, text, align 
 		})
 	}
 	drawTextBitmap(ctx, bitmap, image.Pt(int(math.Floor(x))+offset.X, int(math.Floor(y))+offset.Y))
+}
+
+func newTextLine(ctx *render.Context, size float64, text string, align canvas.TextAlign, fill, outline color.RGBA, outlineWidth float64) *canvas.Text {
+	face := ctx.Fonts.Face(size*72/25.4, nrgba(fill))
+	if outlineWidth > 0 && outline.A > 0 {
+		face = ctx.Fonts.Face(size*72/25.4, nrgba(fill), canvas.FontStroke(outlineWidth, nrgba(outline)))
+	}
+	return canvas.NewTextLine(face, text, align)
 }
 
 func canvasTextAlign(align string) canvas.TextAlign {
@@ -174,8 +168,8 @@ func canvasTextAlign(align string) canvas.TextAlign {
 	}
 }
 
-func textImageKey(size float64, text, align string, fill, outline color.RGBA, outlineWidth, x, y float64) string {
-	return fmt.Sprintf("%g\x00%s\x00%s\x00%v\x00%v\x00%g\x00%g\x00%g", size, text, align, fill, outline, outlineWidth, x, y)
+func textImageKey(size float64, text, align string, fill, outline color.RGBA, outlineWidth, x, y float64) render.TextImageCacheKey {
+	return render.TextImageCacheKey{Text: text, Align: align, Size: size, Fill: fill, Outline: outline, OutlineWidth: outlineWidth, X: x, Y: y}
 }
 
 func prepareStaticTextImage(setup *render.Context, size float64, text, align string, fill, outline color.RGBA, outlineWidth float64) (*image.RGBA, image.Point) {
@@ -186,7 +180,7 @@ func prepareStaticTextImage(setup *render.Context, size float64, text, align str
 	ascent := face.Metrics().Ascent
 	y := ascent - math.Floor(ascent)
 	key := textImageKey(size, text, align, fill, outline, outlineWidth, 0, y)
-	bitmap, offset := setup.CachedTextImage(key, func() (*image.RGBA, image.Point) {
+	bitmap, offset := setup.CachedTextImageByKey(key, func() (*image.RGBA, image.Point) {
 		return rasterizeText(setup, canvas.NewTextLine(face, text, canvasTextAlign(align)), 0, y, fill, outline, outlineWidth)
 	})
 	return bitmap, image.Pt(offset.X, int(math.Floor(ascent))+offset.Y)
@@ -200,7 +194,7 @@ func prepareStaticTopToBottomTextImage(setup *render.Context, size float64, text
 	ascent := face.Metrics().Ascent
 	y := ascent - math.Floor(ascent)
 	key := textImageKey(size, text, "ttb:"+align, fill, outline, outlineWidth, 0, y)
-	bitmap, offset := setup.CachedTextImage(key, func() (*image.RGBA, image.Point) {
+	bitmap, offset := setup.CachedTextImageByKey(key, func() (*image.RGBA, image.Point) {
 		type glyphImage struct {
 			bitmap   *image.RGBA
 			position image.Point
@@ -558,8 +552,15 @@ var linePathPool = sync.Pool{New: func() any {
 	return canvas.NewPathFromData(make([]float64, 0, 3*256))
 }}
 
+var strokePathPool = sync.Pool{New: func() any {
+	return canvas.NewPathFromData(make([]float64, 0, 16*256))
+}}
+
 func drawLine(ctx *render.Context, points [][2]float64, stroke color.RGBA, width float64) {
-	if len(points) < 2 {
+	if len(points) < 2 || width <= 0 {
+		return
+	}
+	if drawMonotonicPolylineStroke(ctx, points, stroke, width) {
 		return
 	}
 	path := linePathPool.Get().(*canvas.Path)
@@ -575,6 +576,116 @@ func drawLine(ctx *render.Context, points [][2]float64, stroke color.RGBA, width
 		path.LineTo(point[0], point[1])
 	}
 	drawLinePath(ctx, path, stroke, width)
+}
+
+func drawMonotonicPolylineStroke(ctx *render.Context, points [][2]float64, stroke color.RGBA, width float64) bool {
+	if width <= 0 || len(points) < 2 {
+		return false
+	}
+	for i, point := range points {
+		if math.IsNaN(point[0]) || math.IsNaN(point[1]) || math.IsInf(point[0], 0) || math.IsInf(point[1], 0) {
+			return false
+		}
+		if i == 0 {
+			continue
+		}
+		if point[0] <= points[i-1][0] {
+			return false
+		}
+		if i > 1 {
+			prevX, prevY := points[i-1][0]-points[i-2][0], points[i-1][1]-points[i-2][1]
+			nextX, nextY := point[0]-points[i-1][0], point[1]-points[i-1][1]
+			if (prevX*nextX+prevY*nextY)/(math.Hypot(prevX, prevY)*math.Hypot(nextX, nextY)) < -0.9 {
+				return false
+			}
+		}
+	}
+
+	path := strokePathPool.Get().(*canvas.Path)
+	path.Reset()
+	defer func() {
+		if cap(path.Data()) <= maxPooledPathData {
+			path.Reset()
+			strokePathPool.Put(path)
+		}
+	}()
+	halfWidth := width / 2
+	appendStrokeSide(path, points, 1, false, halfWidth)
+	appendStrokeSide(path, points, -1, true, halfWidth)
+	path.Close()
+	if !ctx.DrawOwnedFilledPath(0, 0, path, nrgba(stroke)) {
+		drawShape(ctx, path, stroke, color.RGBA{}, 0)
+	}
+	return true
+}
+
+func appendStrokeSide(path *canvas.Path, points [][2]float64, side float64, reverse bool, halfWidth float64) {
+	start, end, step := 0, len(points)-1, 1
+	if reverse {
+		start, end, step = end, start, -1
+	}
+	for i, first := start, true; ; i += step {
+		p0, p1, count := strokeOffsetAt(points, i, side, halfWidth)
+		if reverse && count == 2 {
+			p0, p1 = p1, p0
+		}
+		if first {
+			if !reverse {
+				path.MoveTo(p0[0], p0[1])
+			} else {
+				path.LineTo(p0[0], p0[1])
+			}
+			first = false
+		} else {
+			path.LineTo(p0[0], p0[1])
+		}
+		if count == 2 {
+			path.LineTo(p1[0], p1[1])
+		}
+		if i == end {
+			break
+		}
+	}
+}
+
+func strokeOffsetAt(points [][2]float64, i int, side, halfWidth float64) ([2]float64, [2]float64, int) {
+	p := points[i]
+	if i == 0 || i == len(points)-1 {
+		from, to := i-1, i
+		if i == 0 {
+			from, to = 0, 1
+		}
+		dx, dy := points[to][0]-points[from][0], points[to][1]-points[from][1]
+		length := math.Hypot(dx, dy)
+		nx, ny := -dy/length*halfWidth*side, dx/length*halfWidth*side
+		return [2]float64{p[0] + nx, p[1] + ny}, [2]float64{}, 1
+	}
+
+	prev, next := points[i-1], points[i+1]
+	prevDX, prevDY := p[0]-prev[0], p[1]-prev[1]
+	nextDX, nextDY := next[0]-p[0], next[1]-p[1]
+	prevLength, nextLength := math.Hypot(prevDX, prevDY), math.Hypot(nextDX, nextDY)
+	prevDX, prevDY = prevDX/prevLength, prevDY/prevLength
+	nextDX, nextDY = nextDX/nextLength, nextDY/nextLength
+	prevNX, prevNY := -prevDY*halfWidth*side, prevDX*halfWidth*side
+	nextNX, nextNY := -nextDY*halfWidth*side, nextDX*halfWidth*side
+	prevOffset := [2]float64{p[0] + prevNX, p[1] + prevNY}
+	nextOffset := [2]float64{p[0] + nextNX, p[1] + nextNY}
+	cross := prevDX*nextDY - prevDY*nextDX
+	if math.Abs(cross) < 1e-9 {
+		if prevDX*nextDX+prevDY*nextDY <= 0 {
+			return prevOffset, nextOffset, 2
+		}
+		nx, ny := prevNX+nextNX, prevNY+nextNY
+		length := math.Hypot(nx, ny)
+		return [2]float64{p[0] + nx/length*halfWidth, p[1] + ny/length*halfWidth}, [2]float64{}, 1
+	}
+	distance := ((nextNX-prevNX)*nextDY - (nextNY-prevNY)*nextDX) / cross
+	miter := [2]float64{p[0] + prevNX + distance*prevDX, p[1] + prevNY + distance*prevDY}
+	if math.Hypot(miter[0]-p[0], miter[1]-p[1]) > 4*halfWidth {
+		return prevOffset, nextOffset, 2
+	}
+	return miter, [2]float64{}, 1
 }
 
 func addLinePolygon(path *canvas.Path, x1, y1, x2, y2, width float64) {

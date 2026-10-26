@@ -85,6 +85,8 @@ func circuitMapFactory(element *layout.Element, setup *render.Context) (render.D
 		drawLinePath(&local, path, fill, math.Max(1, lineWidth-outlineWidth))
 		raster.Close()
 	}
+	markerPath := circlePath(4)
+	markerAtlas := newCircleMarkerAtlas(4, markerPath, color.RGBA{R: 255, G: 255, B: 255, A: 255}, color.RGBA{A: 255}, 1)
 	return func(ctx *render.Context) error {
 		if routeImage != nil {
 			drawMapImage(ctx, routeImage)
@@ -97,12 +99,7 @@ func circuitMapFactory(element *layout.Element, setup *render.Context) (render.D
 		point, ok := samplePoint(ctx.Sample)
 		if ok && !isPrivate(point, ctx.Privacy) {
 			point := toPoint(point)
-			ctx.Canvas.Push()
-			ctx.Canvas.SetFillColor(color.RGBA{R: 255, G: 255, B: 255, A: 255})
-			ctx.Canvas.SetStrokeColor(color.RGBA{R: 0, G: 0, B: 0, A: 255})
-			ctx.Canvas.SetStrokeWidth(1)
-			ctx.Canvas.DrawPath(point[0], point[1], circlePath(4))
-			ctx.Canvas.Pop()
+			markerAtlas.draw(ctx, point[0], point[1], markerPath)
 		}
 		return nil
 	}, nil

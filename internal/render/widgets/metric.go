@@ -54,6 +54,7 @@ func metricFactory(element *layout.Element, setup *render.Context) (render.Drawe
 		// The pace accessor selects a speed in m/s; render it with speed-to-pace conversion.
 		conversionMetric = "speed"
 	}
+	ascent := setup.Fonts.Face(size*72/25.4, nrgba(fill)).Metrics().Ascent
 	var lookahead textLookahead
 	if cache {
 		lookahead = func(ctx *render.Context, current string, done <-chan struct{}, prefetch func(string) bool) {
@@ -72,7 +73,7 @@ func metricFactory(element *layout.Element, setup *render.Context) (render.Drawe
 			return err
 		}
 		text := metricText(value, units, format, conversionMetric)
-		drawTextAtAscenderWithLookahead(ctx, 0, 0, size, text, align, fill, outline, outlineWidth, cache, lookahead)
+		drawTextWithLookahead(ctx, 0, ascent, size, text, align, fill, outline, outlineWidth, cache, lookahead)
 		return nil
 	}, nil
 }
@@ -117,7 +118,7 @@ func metricUnitFactory(element *layout.Element, setup *render.Context) (render.D
 	}, nil
 }
 
-func datetimeFactory(element *layout.Element, _ *render.Context) (render.Drawer, error) {
+func datetimeFactory(element *layout.Element, setup *render.Context) (render.Drawer, error) {
 	format := attr(element, "format", "")
 	if format == "" {
 		return nil, fmt.Errorf("datetime component requires format")
@@ -156,9 +157,10 @@ func datetimeFactory(element *layout.Element, _ *render.Context) (render.Drawer,
 			}, prefetch, done)
 		}
 	}
+	ascent := setup.Fonts.Face(size*72/25.4, nrgba(fill)).Metrics().Ascent
 	return func(ctx *render.Context) error {
 		value := ctx.Sample.Timestamp.In(time.Local).Format(dateLayout)
-		drawTextAtAscenderWithLookahead(ctx, 0, 0, size, truncateText(value, truncate), align, fill, outline, outlineWidth, cache, lookahead)
+		drawTextWithLookahead(ctx, 0, ascent, size, truncateText(value, truncate), align, fill, outline, outlineWidth, cache, lookahead)
 		return nil
 	}, nil
 }

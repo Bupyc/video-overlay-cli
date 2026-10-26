@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"context"
 	"image"
+	"image/color"
 	"image/draw"
 	"math"
 	"sync"
@@ -30,21 +31,41 @@ type Context struct {
 	textCache  *textCache
 	frame      *image.RGBA
 	opaque     bool
+	pathFill   *pathFillRenderer
 }
 
 type Drawer func(*Context) error
 
 type Factory func(*layout.Element, *Context) (Drawer, error)
 
+type TextImageCacheKey struct {
+	Text         string
+	Align        string
+	Size         float64
+	Fill         color.RGBA
+	Outline      color.RGBA
+	OutlineWidth float64
+	X            float64
+	Y            float64
+}
+
+type textImageCacheKey struct {
+	kind                uint8
+	raw, text, align    string
+	size, outline, x, y uint64
+	fill, outlineColor  color.RGBA
+}
+
 type textCache struct {
 	mu       sync.Mutex
-	items    map[string]*cachedTextImage
-	building map[string]*textImageBuild
+	items    map[textImageCacheKey]*cachedTextImage
+	building map[textImageCacheKey]*textImageBuild
 	order    list.List
 	maxItems int
 }
 
 const maxTextCacheItems = 1024
+const maxSharedTextCacheItems = 4 * maxTextCacheItems
 const maxTextLookaheadBuilds = 5
 
 type cachedTextImage struct {
@@ -61,10 +82,71 @@ type textImageBuild struct {
 }
 
 func (ctx *Context) CachedTextImage(key string, build func() (*image.RGBA, image.Point)) (*image.RGBA, image.Point) {
-	return ctx.CachedTextImageWithLookahead(key, build, nil)
+	return ctx.cachedTextImage(textImageCacheKey{raw: key}, build, nil)
+}
+
+func (ctx *Context) LookupCachedTextImage(key string) (*image.RGBA, image.Point, bool) {
+	return ctx.lookupCachedTextImage(textImageCacheKey{raw: key})
+}
+
+func (ctx *Context) CachedTextImageByKey(key TextImageCacheKey, build func() (*image.RGBA, image.Point)) (*image.RGBA, image.Point) {
+	return ctx.cachedTextImage(key.cacheKey(), build, nil)
+}
+
+func (ctx *Context) LookupCachedTextImageByKey(key TextImageCacheKey) (*image.RGBA, image.Point, bool) {
+	return ctx.lookupCachedTextImage(key.cacheKey())
+}
+
+func (ctx *Context) lookupCachedTextImage(key textImageCacheKey) (*image.RGBA, image.Point, bool) {
+	if ctx.textCache == nil {
+		return nil, image.Point{}, false
+	}
+	cache := ctx.textCache
+	cache.mu.Lock()
+	cache.initialize()
+	if cached := cache.items[key]; cached != nil {
+		cache.order.MoveToFront(cached.order)
+		cache.mu.Unlock()
+		return cached.image, cached.offset, true
+	}
+	cache.mu.Unlock()
+	return nil, image.Point{}, false
 }
 
 func (ctx *Context) CachedTextImageWithLookahead(key string, build func() (*image.RGBA, image.Point), lookahead func(<-chan struct{}, func(string, func() (*image.RGBA, image.Point)) bool)) (*image.RGBA, image.Point) {
+	var cacheLookahead func(<-chan struct{}, func(textImageCacheKey, func() (*image.RGBA, image.Point)) bool)
+	if lookahead != nil {
+		cacheLookahead = func(done <-chan struct{}, prefetch func(textImageCacheKey, func() (*image.RGBA, image.Point)) bool) {
+			lookahead(done, func(futureKey string, futureBuild func() (*image.RGBA, image.Point)) bool {
+				return prefetch(textImageCacheKey{raw: futureKey}, futureBuild)
+			})
+		}
+	}
+	return ctx.cachedTextImage(textImageCacheKey{raw: key}, build, cacheLookahead)
+}
+
+func (ctx *Context) CachedTextImageByKeyWithLookahead(key TextImageCacheKey, build func() (*image.RGBA, image.Point), lookahead func(<-chan struct{}, func(TextImageCacheKey, func() (*image.RGBA, image.Point)) bool)) (*image.RGBA, image.Point) {
+	var cacheLookahead func(<-chan struct{}, func(textImageCacheKey, func() (*image.RGBA, image.Point)) bool)
+	if lookahead != nil {
+		cacheLookahead = func(done <-chan struct{}, prefetch func(textImageCacheKey, func() (*image.RGBA, image.Point)) bool) {
+			lookahead(done, func(futureKey TextImageCacheKey, futureBuild func() (*image.RGBA, image.Point)) bool {
+				return prefetch(futureKey.cacheKey(), futureBuild)
+			})
+		}
+	}
+	return ctx.cachedTextImage(key.cacheKey(), build, cacheLookahead)
+}
+
+func (key TextImageCacheKey) cacheKey() textImageCacheKey {
+	return textImageCacheKey{
+		kind: 1, text: key.Text, align: key.Align,
+		size: math.Float64bits(key.Size), outline: math.Float64bits(key.OutlineWidth),
+		x: math.Float64bits(key.X), y: math.Float64bits(key.Y),
+		fill: key.Fill, outlineColor: key.Outline,
+	}
+}
+
+func (ctx *Context) cachedTextImage(key textImageCacheKey, build func() (*image.RGBA, image.Point), lookahead func(<-chan struct{}, func(textImageCacheKey, func() (*image.RGBA, image.Point)) bool)) (*image.RGBA, image.Point) {
 	if ctx.textCache == nil {
 		return build()
 	}
@@ -79,7 +161,7 @@ func (ctx *Context) CachedTextImageWithLookahead(key string, build func() (*imag
 	if pending := cache.building[key]; pending != nil {
 		cache.mu.Unlock()
 		if lookahead != nil {
-			lookahead(pending.done, func(futureKey string, futureBuild func() (*image.RGBA, image.Point)) bool {
+			lookahead(pending.done, func(futureKey textImageCacheKey, futureBuild func() (*image.RGBA, image.Point)) bool {
 				return cache.prefetch(key, pending, futureKey, futureBuild)
 			})
 		}
@@ -94,7 +176,7 @@ func (ctx *Context) CachedTextImageWithLookahead(key string, build func() (*imag
 	return pending.image, pending.offset
 }
 
-func (cache *textCache) prefetch(currentKey string, current *textImageBuild, key string, build func() (*image.RGBA, image.Point)) bool {
+func (cache *textCache) prefetch(currentKey textImageCacheKey, current *textImageBuild, key textImageCacheKey, build func() (*image.RGBA, image.Point)) bool {
 	cache.mu.Lock()
 	cache.initialize()
 	if cache.building[currentKey] != current || current.lookaheadCount >= maxTextLookaheadBuilds || key == currentKey || cache.items[key] != nil || cache.building[key] != nil {
@@ -111,14 +193,14 @@ func (cache *textCache) prefetch(currentKey string, current *textImageBuild, key
 
 func (cache *textCache) initialize() {
 	if cache.items == nil {
-		cache.items = make(map[string]*cachedTextImage)
+		cache.items = make(map[textImageCacheKey]*cachedTextImage)
 	}
 	if cache.building == nil {
-		cache.building = make(map[string]*textImageBuild)
+		cache.building = make(map[textImageCacheKey]*textImageBuild)
 	}
 }
 
-func (cache *textCache) build(key string, pending *textImageBuild, build func() (*image.RGBA, image.Point)) {
+func (cache *textCache) build(key textImageCacheKey, pending *textImageBuild, build func() (*image.RGBA, image.Point)) {
 	pending.image, pending.offset = build()
 	cache.mu.Lock()
 	limit := cache.maxItems
@@ -127,7 +209,7 @@ func (cache *textCache) build(key string, pending *textImageBuild, build func() 
 	}
 	if len(cache.items) == limit {
 		oldest := cache.order.Back()
-		delete(cache.items, oldest.Value.(string))
+		delete(cache.items, oldest.Value.(textImageCacheKey))
 		cache.order.Remove(oldest)
 	}
 	cached := &cachedTextImage{image: pending.image, offset: pending.offset}
@@ -197,11 +279,13 @@ func drawRGBAOverOpaque(dst, src *image.RGBA, point image.Point) {
 				d[x], d[x+1], d[x+2] = s[x], s[x+1], s[x+2]
 				continue
 			}
-			sa := uint32(alpha) * 0x101
-			a := (0xffff - sa) * 0x101
-			d[x] = uint8((uint32(d[x])*a/0xffff + uint32(s[x])*0x101) >> 8)
-			d[x+1] = uint8((uint32(d[x+1])*a/0xffff + uint32(s[x+1])*0x101) >> 8)
-			d[x+2] = uint8((uint32(d[x+2])*a/0xffff + uint32(s[x+2])*0x101) >> 8)
+			inverseAlpha := uint32(255 - alpha)
+			red := uint32(d[x]) * inverseAlpha
+			green := uint32(d[x+1]) * inverseAlpha
+			blue := uint32(d[x+2]) * inverseAlpha
+			d[x] = uint8(uint32(s[x]) + ((red + 2*red/255 + uint32(s[x])) >> 8))
+			d[x+1] = uint8(uint32(s[x+1]) + ((green + 2*green/255 + uint32(s[x+1])) >> 8))
+			d[x+2] = uint8(uint32(s[x+2]) + ((blue + 2*blue/255 + uint32(s[x+2])) >> 8))
 		}
 		d0 += dst.Stride
 		s0 += src.Stride

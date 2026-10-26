@@ -2,7 +2,6 @@ package activity
 
 import (
 	"fmt"
-	"reflect"
 	"time"
 )
 
@@ -24,7 +23,7 @@ func Resample(a *Activity, rate int) error {
 	}
 	step := time.Second / time.Duration(rate)
 	start, end := a.Samples[0].Timestamp, a.Samples[len(a.Samples)-1].Timestamp
-	resampled := make([]Sample, 0)
+	resampled := make([]Sample, 0, int(end.Sub(start)/step)+1)
 	index := 1
 	for at := start; !at.After(end); at = at.Add(step) {
 		for index < len(a.Samples) && a.Samples[index].Timestamp.Before(at) {
@@ -45,18 +44,51 @@ func interpolateSample(start, end Sample, at time.Time) Sample {
 	result := start
 	result.Timestamp = at
 	position := float64(at.Sub(start.Timestamp)) / float64(end.Timestamp.Sub(start.Timestamp))
-	valueType := reflect.TypeOf(Value{})
-	source, other, target := reflect.ValueOf(start), reflect.ValueOf(end), reflect.ValueOf(&result).Elem()
-	for i := 0; i < target.NumField(); i++ {
-		if target.Type().Field(i).Type != valueType {
-			continue
-		}
-		first, second := source.Field(i).Interface().(Value), other.Field(i).Interface().(Value)
-		if first.Valid && second.Valid {
-			target.Field(i).Set(reflect.ValueOf(Value{Number: first.Number + (second.Number-first.Number)*position, Valid: true}))
-		} else {
-			target.Field(i).Set(reflect.Zero(valueType))
-		}
-	}
+	result.Latitude = interpolateValue(start.Latitude, end.Latitude, position)
+	result.Longitude = interpolateValue(start.Longitude, end.Longitude, position)
+	result.Distance = interpolateValue(start.Distance, end.Distance, position)
+	result.Altitude = interpolateValue(start.Altitude, end.Altitude, position)
+	result.Speed = interpolateValue(start.Speed, end.Speed, position)
+	result.VerticalSpeed = interpolateValue(start.VerticalSpeed, end.VerticalSpeed, position)
+	result.HR = interpolateValue(start.HR, end.HR, position)
+	result.Cadence = interpolateValue(start.Cadence, end.Cadence, position)
+	result.RunningCadence = interpolateValue(start.RunningCadence, end.RunningCadence, position)
+	result.Power = interpolateValue(start.Power, end.Power, position)
+	result.Temperature = interpolateValue(start.Temperature, end.Temperature, position)
+	result.Grade = interpolateValue(start.Grade, end.Grade, position)
+	result.RawSpeed = interpolateValue(start.RawSpeed, end.RawSpeed, position)
+	result.CSpeed = interpolateValue(start.CSpeed, end.CSpeed, position)
+	result.CSpeedRaw = interpolateValue(start.CSpeedRaw, end.CSpeedRaw, position)
+	result.LongSpeed = interpolateValue(start.LongSpeed, end.LongSpeed, position)
+	result.DistanceDelta = interpolateValue(start.DistanceDelta, end.DistanceDelta, position)
+	result.Elapsed = interpolateValue(start.Elapsed, end.Elapsed, position)
+	result.Azimuth = interpolateValue(start.Azimuth, end.Azimuth, position)
+	result.Course = interpolateValue(start.Course, end.Course, position)
+	result.Acceleration = interpolateValue(start.Acceleration, end.Acceleration, position)
+	result.CVerticalSpeed = interpolateValue(start.CVerticalSpeed, end.CVerticalSpeed, position)
+	result.LVerticalSpeed = interpolateValue(start.LVerticalSpeed, end.LVerticalSpeed, position)
+	result.XLVerticalSpeed = interpolateValue(start.XLVerticalSpeed, end.XLVerticalSpeed, position)
+	result.CGradient = interpolateValue(start.CGradient, end.CGradient, position)
+	result.LGradient = interpolateValue(start.LGradient, end.LGradient, position)
+	result.XLGradient = interpolateValue(start.XLGradient, end.XLGradient, position)
+	result.DistanceGradient = interpolateValue(start.DistanceGradient, end.DistanceGradient, position)
+	result.Odometer = interpolateValue(start.Odometer, end.Odometer, position)
+	result.CumulativeDistance = interpolateValue(start.CumulativeDistance, end.CumulativeDistance, position)
+	result.GPSAccuracy = interpolateValue(start.GPSAccuracy, end.GPSAccuracy, position)
+	result.GPSPacket = interpolateValue(start.GPSPacket, end.GPSPacket, position)
+	result.GPSPacketIndex = interpolateValue(start.GPSPacketIndex, end.GPSPacketIndex, position)
+	result.GPSLock = interpolateValue(start.GPSLock, end.GPSLock, position)
+	result.GPSFix = interpolateValue(start.GPSFix, end.GPSFix, position)
+	result.FrontGear = interpolateValue(start.FrontGear, end.FrontGear, position)
+	result.RearGear = interpolateValue(start.RearGear, end.RearGear, position)
+	result.Respiration = interpolateValue(start.Respiration, end.Respiration, position)
+	result.SDPS = interpolateValue(start.SDPS, end.SDPS, position)
 	return result
+}
+
+func interpolateValue(start, end Value, position float64) Value {
+	if !start.Valid || !end.Valid {
+		return Value{}
+	}
+	return Value{Number: start.Number + (end.Number-start.Number)*position, Valid: true}
 }

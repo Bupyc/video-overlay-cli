@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -46,9 +47,20 @@ func TestTransparentRenderWorkersAreBoundedByFrameWindow(t *testing.T) {
 	}
 }
 
-func TestRenderWorkerCountHonorsExplicitRequest(t *testing.T) {
+func TestFrameBatchCountMatchesFrameWindow(t *testing.T) {
+	for _, tc := range []struct{ frames, batches int }{{4, 1}, {8, 2}, {16, 4}, {32, 8}} {
+		if got := frameBatchCount(tc.frames); got != tc.batches {
+			t.Errorf("frameBatchCount(%d) = %d, want %d", tc.frames, got, tc.batches)
+		}
+	}
+}
+
+func TestRenderWorkerCountCapsAutoAndHonorsExplicitRequest(t *testing.T) {
 	if got := renderWorkerCount(24); got != 24 {
 		t.Fatalf("renderWorkerCount(24) = %d, want 24", got)
+	}
+	if got, want := renderWorkerCount(0), min(4, runtime.GOMAXPROCS(0)); got != want {
+		t.Fatalf("renderWorkerCount(0) = %d, want %d", got, want)
 	}
 }
 
@@ -73,6 +85,49 @@ func TestRunPrintsRootAndRenderHelp(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "alpha-vp9") {
 		t.Errorf("render help does not list alpha-vp9: %q", stdout.String())
+	}
+	for _, defaultValue := range []string{"default black)", "default black-h264)"} {
+		if !strings.Contains(stdout.String(), defaultValue) {
+			t.Errorf("render help does not include %q: %q", defaultValue, stdout.String())
+		}
+	}
+	if !strings.Contains(stdout.String(), "default up to 4") {
+		t.Errorf("render help does not include the auto worker limit: %q", stdout.String())
+	}
+}
+
+func TestRunRenderDefaultsToBlackH264(t *testing.T) {
+	dir := t.TempDir()
+	activityPath, layoutPath := writeCLIInputs(t, dir, `<layout/>`)
+	argsPath, rawPath := filepath.Join(dir, "args.txt"), filepath.Join(dir, "frames.yuv")
+	ffmpegPath := filepath.Join(dir, "ffmpeg")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argsPath + "'\ncat > '" + rawPath + "'\n"
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{
+		"render", "--activity", activityPath, "--layout", layoutPath, "--output", filepath.Join(dir, "overlay.mp4"),
+		"--size", "2x2", "--fps", "4", "--workers", "1", "--ffmpeg", ffmpegPath,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("Run returned %v (stderr %q)", err, stderr.String())
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, arg := range []string{"-pix_fmt\nyuv420p\n", "-c:v\nlibx264\n"} {
+		if !strings.Contains(string(args), arg) {
+			t.Errorf("FFmpeg args missing %q:\n%s", arg, args)
+		}
+	}
+	frames, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(frames), 3*2*2*3/2; got != want {
+		t.Fatalf("streamed %d bytes, want %d (three YUV420P frames)", got, want)
 	}
 }
 
@@ -295,7 +350,7 @@ func TestRunRenderStreamsGeneratedFramesToFFmpeg(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{
 		"render", "--activity", activityPath, "--layout", layoutPath, "--output", filepath.Join(dir, "overlay.mov"),
-		"--size", "2x2", "--fps", "4", "--background", "transparent", "--profile", "alpha-prores", "--workers", "2", "--ffmpeg", ffmpegPath,
+		"--size", "2x2", "--fps", "8", "--background", "transparent", "--profile", "alpha-prores", "--workers", "2", "--ffmpeg", ffmpegPath,
 	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("Run returned %v (stderr %q)", err, stderr.String())
@@ -304,10 +359,10 @@ func TestRunRenderStreamsGeneratedFramesToFFmpeg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(frames), 3*2*2*4; got != want {
-		t.Fatalf("streamed %d bytes, want %d (three RGBA frames)", got, want)
+	if got, want := len(frames), 5*2*2*4; got != want {
+		t.Fatalf("streamed %d bytes, want %d (five RGBA frames)", got, want)
 	}
-	if !strings.Contains(stdout.String(), fmt.Sprintf("%d frames", 3)) {
+	if !strings.Contains(stdout.String(), fmt.Sprintf("%d frames", 5)) {
 		t.Fatalf("unexpected success output: %q", stdout.String())
 	}
 }

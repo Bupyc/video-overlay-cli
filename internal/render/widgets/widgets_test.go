@@ -178,6 +178,27 @@ func TestCachedTextMatchesDirectCanvasText(t *testing.T) {
 	}
 }
 
+func TestTextImageKeyIsAllocationFree(t *testing.T) {
+	fill := color.RGBA{R: 128, G: 240, B: 17, A: 211}
+	outline := color.RGBA{R: 7, G: 31, B: 255, A: 190}
+	want := render.TextImageCacheKey{Text: "−12.4 km/h", Align: "center", Size: 12.75, Fill: fill, Outline: outline, OutlineWidth: 1.5, X: 0.375, Y: 0.875}
+	if got := textImageKey(12.75, "−12.4 km/h", "center", fill, outline, 1.5, 0.375, 0.875); got != want {
+		t.Fatalf("text image key = %+v, want %+v", got, want)
+	}
+	longText := strings.Repeat("x", 300)
+	longKey := textImageKey(12.75, longText, "center", fill, outline, 1.5, 0.375, 0.875)
+	if longKey.Text != longText {
+		t.Fatal("long text was not retained in the cache key")
+	}
+	var key render.TextImageCacheKey
+	allocs := testing.AllocsPerRun(100, func() {
+		key = textImageKey(12.75, "−12.4 km/h", "center", fill, outline, 1.5, 0.375, 0.875)
+	})
+	if key != want || allocs != 0 {
+		t.Fatalf("text image key allocations = %.1f, want 0", allocs)
+	}
+}
+
 func TestTextTopToBottomUsesCompactLineSpacing(t *testing.T) {
 	fonts := canvas.NewFontFamily("test")
 	if err := fonts.LoadSystemFont("Roboto", canvas.FontRegular); err != nil {
@@ -313,6 +334,35 @@ func TestColorAttrPreservesStraightAlphaWhenDrawing(t *testing.T) {
 	}
 }
 
+func TestPolylineStrokeMatchesCanvasStroke(t *testing.T) {
+	for _, points := range [][][2]float64{
+		{{8, 20}, {24, 28}, {46, 17}, {68, 35}, {92, 24}},
+		{{8, 15}, {26, 39}, {46, 28}, {64, 8}, {92, 25}},
+	} {
+		stroke := color.RGBA{R: 210, G: 245, B: 255, A: 220}
+		var optimized bool
+		got := drawBufferedStandaloneFrame(t, standaloneActivity(), 0, image.Pt(100, 50), func(ctx *render.Context) error {
+			optimized = drawMonotonicPolylineStroke(ctx, points, stroke, 3)
+			return nil
+		})
+		if !optimized {
+			t.Fatal("monotonic line was not handled by the optimized stroke path")
+		}
+		want := drawStandaloneFrame(t, standaloneActivity(), 0, image.Pt(100, 50), func(ctx *render.Context) error {
+			path := &canvas.Path{}
+			path.MoveTo(points[0][0], points[0][1])
+			for _, point := range points[1:] {
+				path.LineTo(point[0], point[1])
+			}
+			drawLinePath(ctx, path, stroke, 3)
+			return nil
+		})
+		if diff := maxPixelChannelDiff(got, want); diff > 8 {
+			t.Fatalf("optimized polyline stroke differs from Canvas stroke by %d channel levels", diff)
+		}
+	}
+}
+
 func TestTimeChartWindowIsCenteredAndInterpolated(t *testing.T) {
 	start := time.Unix(0, 0).UTC()
 	activity := &activity.Activity{Samples: []activity.Sample{
@@ -321,6 +371,28 @@ func TestTimeChartWindowIsCenteredAndInterpolated(t *testing.T) {
 		{Timestamp: start.Add(20 * time.Second), Altitude: activity.Value{Number: 20, Valid: true}},
 	}}
 	values, marker := timeChartValues(activity, start.Add(10*time.Second), 20*time.Second, 4, "alt", "m")
+	for i, want := range []float64{0, 5, 10, 15} {
+		if !values[i].Valid || values[i].Number != want {
+			t.Errorf("chart value %d = %#v, want %v", i, values[i], want)
+		}
+	}
+	if marker != 2 {
+		t.Errorf("marker index = %v, want 2", marker)
+	}
+}
+
+func TestTimeChartValuesReuseProvidedBuffer(t *testing.T) {
+	start := time.Unix(0, 0).UTC()
+	a := &activity.Activity{Samples: []activity.Sample{
+		{Timestamp: start, Altitude: activity.Value{Number: 0, Valid: true}},
+		{Timestamp: start.Add(10 * time.Second), Altitude: activity.Value{Number: 10, Valid: true}},
+		{Timestamp: start.Add(20 * time.Second), Altitude: activity.Value{Number: 20, Valid: true}},
+	}}
+	buffer := make([]activity.Value, 0, 4)
+	values, marker := timeChartValuesInto(buffer, a, start.Add(10*time.Second), 20*time.Second, 4, "alt", "m")
+	if &values[0] != &buffer[:4][0] {
+		t.Fatal("time chart allocated instead of reusing its destination buffer")
+	}
 	for i, want := range []float64{0, 5, 10, 15} {
 		if !values[i].Valid || values[i].Number != want {
 			t.Errorf("chart value %d = %#v, want %v", i, values[i], want)
@@ -342,6 +414,38 @@ func TestDistanceChartRequiresRecordedDistance(t *testing.T) {
 	}
 }
 
+func TestPreparedDistanceChartValues(t *testing.T) {
+	a := &activity.Activity{Samples: []activity.Sample{
+		{Distance: activity.Value{Number: 0, Valid: true}, Odometer: activity.Value{Number: 0, Valid: true}, Altitude: activity.Value{Number: 0, Valid: true}},
+		{Distance: activity.Value{Number: 50, Valid: true}, Odometer: activity.Value{Number: 50, Valid: true}, Altitude: activity.Value{Number: 10, Valid: true}},
+		{Distance: activity.Value{Number: 100, Valid: true}, Odometer: activity.Value{Number: 100, Valid: true}, Altitude: activity.Value{Number: 20, Valid: true}},
+		{Distance: activity.Value{Number: 150, Valid: true}, Odometer: activity.Value{Number: 150, Valid: true}, Altitude: activity.Value{Number: 30, Valid: true}},
+		{Distance: activity.Value{Number: 200, Valid: true}, Odometer: activity.Value{Number: 200, Valid: true}, Altitude: activity.Value{Number: 40, Valid: true}},
+	}}
+	points, monotonic := prepareDistanceChartPoints(a, "alt")
+	values, marker := distanceChartValues(points, monotonic, activity.Value{Number: 150, Valid: true}, 100, 5, "alt", "m")
+
+	for i, want := range []float64{20, 30, 30, 40, 40} {
+		if !values[i].Valid || values[i].Number != want {
+			t.Errorf("chart value %d = %#v, want %v", i, values[i], want)
+		}
+	}
+	if marker != 2 {
+		t.Errorf("marker index = %v, want 2", marker)
+	}
+	a.Samples[3].Odometer.Number = 90
+	points, monotonic = prepareDistanceChartPoints(a, "alt")
+	values, marker = distanceChartValues(points, monotonic, activity.Value{Number: 150, Valid: true}, 100, 5, "alt", "m")
+	if monotonic || marker != 0 {
+		t.Fatalf("non-monotonic chart = monotonic %v, marker %v; want false, 0", monotonic, marker)
+	}
+	for i, value := range values {
+		if value.Valid {
+			t.Errorf("non-monotonic chart value %d = %#v, want invalid", i, value)
+		}
+	}
+}
+
 func maxPixelChannelDiff(a, b *image.RGBA) uint8 {
 	var maxDiff uint8
 	for i := range a.Pix {
@@ -350,6 +454,41 @@ func maxPixelChannelDiff(a, b *image.RGBA) uint8 {
 		}
 	}
 	return maxDiff
+}
+
+func TestCircleMarkerAtlasMatchesVectorAtQuantizedPhases(t *testing.T) {
+	path := canvas.Circle(4)
+	fill, stroke := color.RGBA{R: 255, G: 255, B: 255, A: 255}, color.RGBA{A: 255}
+	atlas := newCircleMarkerAtlas(4, path, fill, stroke, 1)
+	for _, opaque := range []bool{false, true} {
+		for y := 0; y < chartMarkerPhaseSteps; y++ {
+			for x := 0; x < chartMarkerPhaseSteps; x++ {
+				markerX := 12 + float64(x)/chartMarkerPhaseSteps
+				markerY := 12 + float64(y)/chartMarkerPhaseSteps
+				renderMarkerFrame := func(drawMarker func(*render.Context)) *image.RGBA {
+					frame := image.NewRGBA(image.Rect(0, 0, 24, 24))
+					if opaque {
+						draw.Draw(frame, frame.Bounds(), image.NewUniform(color.RGBA{A: 255}), image.Point{}, draw.Src)
+					}
+					raster := rasterizer.FromImage(frame, canvas.DPMM(1), nil)
+					ctx := &render.Context{Canvas: canvas.NewContext(raster)}
+					ctx.Canvas.SetCoordSystem(canvas.CartesianIV)
+					drawMarker(ctx)
+					raster.Close()
+					return frame
+				}
+				want := renderMarkerFrame(func(ctx *render.Context) {
+					drawCircleMarkerPath(ctx, markerX, markerY, path, fill, stroke, 1)
+				})
+				got := renderMarkerFrame(func(ctx *render.Context) {
+					atlas.draw(ctx, markerX, markerY, path)
+				})
+				if diff := maxPixelChannelDiff(got, want); diff > 1 {
+					t.Errorf("marker atlas phase (%d,%d), opaque=%v differs by %d channel levels", x, y, opaque, diff)
+				}
+			}
+		}
+	}
 }
 
 func TestCairoWidgetGalleryRendersAllVectorWidgets(t *testing.T) {
@@ -480,6 +619,29 @@ func drawStandaloneFrame(t *testing.T, a *activity.Activity, at time.Duration, s
 	}
 	raster.Close()
 	return frame
+}
+
+func drawBufferedStandaloneFrame(t *testing.T, a *activity.Activity, at time.Duration, size image.Point, drawer render.Drawer) *image.RGBA {
+	t.Helper()
+	doc, err := layout.Parse(strings.NewReader(`<layout><component type="test"/></layout>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := render.NewRegistry()
+	if err := registry.Register("test", func(*layout.Element, *render.Context) (render.Drawer, error) {
+		return drawer, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	renderer, err := render.New(render.Options{Width: size.X, Height: size.Y, Background: render.Transparent}, doc, a, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := renderer.NewFrameBuffer()
+	if err := renderer.FrameAtContextIntoBuffer(nil, at, frame); err != nil {
+		t.Fatal(err)
+	}
+	return frame.RGBA()
 }
 
 func TestTileMapWidgetsRenderFromConfiguredProvider(t *testing.T) {
@@ -661,7 +823,7 @@ func TestScaleIconMatchesPerFrameCanvasScaling(t *testing.T) {
 	}
 }
 
-func TestCircuitMapCachesStaticRouteRaster(t *testing.T) {
+func TestCircuitMapCachesRouteAndMarkerRasters(t *testing.T) {
 	act := widgetActivity()
 	element := &layout.Element{Attributes: []layout.Attribute{{Name: "size", Value: "80"}}}
 	drawer, err := circuitMapFactory(element, &render.Context{Activity: act})
@@ -682,8 +844,8 @@ func TestCircuitMapCachesStaticRouteRaster(t *testing.T) {
 		paths += counter.paths
 		images += counter.images
 	}
-	if paths != 2 || images != 2 {
-		t.Fatalf("two frames rendered %d vector paths and %d images; want one dynamic marker and one cached route image per frame", paths, images)
+	if paths != 0 || images != 4 {
+		t.Fatalf("two frames rendered %d vector paths and %d images; want cached route and marker images per frame", paths, images)
 	}
 }
 

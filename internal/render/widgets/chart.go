@@ -2,19 +2,107 @@ package widgets
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tdewolff/canvas"
+	"github.com/tdewolff/canvas/renderers/rasterizer"
 	"video-overlay-cli/internal/activity"
 	"video-overlay-cli/internal/layout"
 	"video-overlay-cli/internal/metrics"
 	"video-overlay-cli/internal/render"
 )
+
+const maxPooledChartSamples = 4096
+const chartMarkerPhaseSteps = 8
+
+// shortcut: circle radii above 16 canvas units use vector rendering to bound atlas memory.
+const maxCachedChartMarkerSize = 16
+
+type circleMarkerAtlas struct {
+	padding     int
+	fill        color.Color
+	stroke      color.Color
+	strokeWidth float64
+	images      [chartMarkerPhaseSteps * chartMarkerPhaseSteps]*image.RGBA
+}
+
+func newCircleMarkerAtlas(size float64, path *canvas.Path, fill, stroke color.Color, strokeWidth float64) *circleMarkerAtlas {
+	padding := int(math.Ceil(size + 2))
+	atlas := &circleMarkerAtlas{padding: padding, fill: fill, stroke: stroke, strokeWidth: strokeWidth}
+	for y := 0; y < chartMarkerPhaseSteps; y++ {
+		for x := 0; x < chartMarkerPhaseSteps; x++ {
+			img := image.NewRGBA(image.Rect(0, 0, 2*padding, 2*padding))
+			raster := rasterizer.FromImage(img, canvas.DPMM(1), nil)
+			marker := canvas.NewContext(raster)
+			marker.SetCoordSystem(canvas.CartesianIV)
+			marker.SetFillColor(fill)
+			marker.SetStrokeColor(stroke)
+			marker.SetStrokeWidth(strokeWidth)
+			marker.DrawPath(float64(padding)+float64(x)/chartMarkerPhaseSteps, float64(padding)+float64(y)/chartMarkerPhaseSteps, path)
+			raster.Close()
+			atlas.images[y*chartMarkerPhaseSteps+x] = img
+		}
+	}
+	return atlas
+}
+
+func (atlas *circleMarkerAtlas) draw(ctx *render.Context, x, y float64, path *canvas.Path) {
+	view := ctx.Canvas.View()
+	if ctx.Canvas.CoordView() != canvas.Identity || view[0][0] != 1 || view[0][1] != 0 || view[1][0] != 0 || view[1][1] != 1 {
+		drawCircleMarkerPath(ctx, x, y, path, atlas.fill, atlas.stroke, atlas.strokeWidth)
+		return
+	}
+	origin := view.Dot(canvas.Point{})
+	position := view.Dot(canvas.Point{X: x, Y: y})
+	baseX, baseY := math.Floor(position.X), math.Floor(position.Y)
+	phaseX := int(math.Round((position.X - baseX) * chartMarkerPhaseSteps))
+	phaseY := int(math.Round((position.Y - baseY) * chartMarkerPhaseSteps))
+	if phaseX == chartMarkerPhaseSteps {
+		baseX++
+		phaseX = 0
+	}
+	if phaseY == chartMarkerPhaseSteps {
+		baseY++
+		phaseY = 0
+	}
+	drawImage(ctx, baseX-origin.X-float64(atlas.padding), baseY-origin.Y-float64(atlas.padding), atlas.images[phaseY*chartMarkerPhaseSteps+phaseX])
+}
+
+func drawCircleMarkerPath(ctx *render.Context, x, y float64, path *canvas.Path, fill, stroke color.Color, strokeWidth float64) {
+	ctx.Canvas.Push()
+	ctx.Canvas.SetFillColor(fill)
+	ctx.Canvas.SetStrokeColor(stroke)
+	ctx.Canvas.SetStrokeWidth(strokeWidth)
+	ctx.Canvas.DrawPath(x, y, path)
+	ctx.Canvas.Pop()
+}
+
+type chartScratch struct {
+	values []activity.Value
+	points [][2]float64
+	area   *canvas.Path
+}
+
+var chartScratchPool = sync.Pool{New: func() any {
+	return &chartScratch{area: canvas.NewPathFromData(make([]float64, 0, 4*512))}
+}}
+
+func releaseChartScratch(scratch *chartScratch) {
+	if cap(scratch.values) > maxPooledChartSamples || cap(scratch.points) > maxPooledChartSamples || cap(scratch.area.Data()) > maxPooledPathData {
+		return
+	}
+	scratch.values = scratch.values[:0]
+	scratch.points = scratch.points[:0]
+	scratch.area.Reset()
+	chartScratchPool.Put(scratch)
+}
 
 func chartFactory(element *layout.Element, setup *render.Context) (render.Drawer, error) {
 	name := attr(element, "metric", "alt")
@@ -82,17 +170,37 @@ func chartFactory(element *layout.Element, setup *render.Context) (render.Drawer
 	filled := attr(element, "filled", "true") != "false"
 	showValues := attr(element, "values", "true") != "false"
 	units := attr(element, "units", "m")
+	var distancePoints []distanceChartPoint
+	var distanceMonotonic bool
+	if useDistance {
+		distancePoints, distanceMonotonic = prepareDistanceChartPoints(setup.Activity, name)
+	}
+	chartWidth := width
+	if chartWidth == 0 {
+		chartWidth = samples
+	}
+	backgroundPath := canvas.Rectangle(float64(chartWidth), float64(height))
+	var markerPath *canvas.Path
+	var markerAtlas *circleMarkerAtlas
+	if markerSize > 0 {
+		markerPath = canvas.Circle(markerSize)
+		if markerSize <= maxCachedChartMarkerSize {
+			markerAtlas = newCircleMarkerAtlas(markerSize, markerPath, color.RGBA{R: 255, A: 255}, color.RGBA{A: 255}, 1)
+		}
+	}
 	return func(ctx *render.Context) error {
+		scratch := chartScratchPool.Get().(*chartScratch)
+		defer releaseChartScratch(scratch)
 		current := ctx.Activity.Start.Add(ctx.At)
-		values, markerIndex := timeChartValues(ctx.Activity, current, time.Duration(seconds)*time.Second, samples, name, units)
+		var values []activity.Value
+		var markerIndex float64
 		if useDistance {
-			values, markerIndex = distanceChartValues(ctx.Activity, odometerAt(ctx.Activity, current), windowDistance, samples, name, units)
+			values, markerIndex = distanceChartValuesInto(scratch.values, distancePoints, distanceMonotonic, odometerAt(ctx.Activity, current), windowDistance, samples, name, units)
+		} else {
+			values, markerIndex = timeChartValuesInto(scratch.values, ctx.Activity, current, time.Duration(seconds)*time.Second, samples, name, units)
 		}
-		chartWidth := width
-		if chartWidth == 0 {
-			chartWidth = max(1, len(values))
-		}
-		drawShape(ctx, canvas.Rectangle(float64(chartWidth), float64(height)), bg, color.RGBA{}, 0)
+		scratch.values = values
+		drawShape(ctx, backgroundPath, bg, color.RGBA{}, 0)
 		minimum, maximum := math.Inf(1), math.Inf(-1)
 		first, last := -1, -1
 		for i, value := range values {
@@ -115,7 +223,7 @@ func chartFactory(element *layout.Element, setup *render.Context) (render.Drawer
 			}
 			return (index - float64(first)) * float64(chartWidth) / float64(max(last-first, 1))
 		}
-		points := make([][2]float64, 0, len(values))
+		points := scratch.points[:0]
 		for i, value := range values {
 			if !value.Valid {
 				continue
@@ -124,8 +232,10 @@ func chartFactory(element *layout.Element, setup *render.Context) (render.Drawer
 			py := float64(height-1) - (value.Number-minimum)*scaleY
 			points = append(points, [2]float64{px, py})
 		}
+		scratch.points = points
 		if filled && len(points) > 1 {
-			area := &canvas.Path{}
+			area := scratch.area
+			area.Reset()
 			area.MoveTo(points[0][0], float64(height-1))
 			area.LineTo(points[0][0], points[0][1])
 			for _, point := range points[1:] {
@@ -133,19 +243,21 @@ func chartFactory(element *layout.Element, setup *render.Context) (render.Drawer
 			}
 			area.LineTo(points[len(points)-1][0], float64(height-1))
 			area.Close()
-			drawShape(ctx, area, fill, color.RGBA{}, 0)
+			if !ctx.DrawOwnedFilledPath(0, 0, area, nrgba(fill)) {
+				drawShape(ctx, area, fill, color.RGBA{}, 0)
+			}
 		}
 		drawLine(ctx, points, line, 2)
 		if len(points) > 0 && markerSize > 0 {
 			markerIndex = math.Max(float64(first), math.Min(float64(last), markerIndex))
 			if value, ok := valueAtIndex(values, markerIndex); ok {
 				markerY := float64(height-1) - (value-minimum)*scaleY
-				ctx.Canvas.Push()
-				ctx.Canvas.SetFillColor(color.RGBA{R: 255, A: 255})
-				ctx.Canvas.SetStrokeColor(color.RGBA{A: 255})
-				ctx.Canvas.SetStrokeWidth(1)
-				ctx.Canvas.DrawPath(xPosition(markerIndex), markerY, canvas.Circle(markerSize))
-				ctx.Canvas.Pop()
+				markerX := xPosition(markerIndex)
+				if markerAtlas == nil {
+					drawCircleMarkerPath(ctx, markerX, markerY, markerPath, color.RGBA{R: 255, A: 255}, color.RGBA{A: 255}, 1)
+				} else {
+					markerAtlas.draw(ctx, markerX, markerY, markerPath)
+				}
 			}
 		}
 		if showValues {
@@ -157,7 +269,11 @@ func chartFactory(element *layout.Element, setup *render.Context) (render.Drawer
 }
 
 func timeChartValues(a *activity.Activity, current time.Time, duration time.Duration, samples int, name, units string) ([]activity.Value, float64) {
-	values := make([]activity.Value, samples)
+	return timeChartValuesInto(nil, a, current, duration, samples, name, units)
+}
+
+func timeChartValuesInto(dst []activity.Value, a *activity.Activity, current time.Time, duration time.Duration, samples int, name, units string) ([]activity.Value, float64) {
+	values := chartValuesBuffer(dst, samples)
 	step := duration / time.Duration(samples)
 	start := current.Add(-duration / 2)
 	for i := range values {
@@ -201,24 +317,46 @@ func chartValueAt(a *activity.Activity, at time.Time, name string) activity.Valu
 	return activity.Value{Number: start.Number + (end.Number-start.Number)*position, Valid: true}
 }
 
-func distanceChartValues(a *activity.Activity, currentOdo activity.Value, distance float64, samples int, name, units string) ([]activity.Value, float64) {
-	values := make([]activity.Value, samples)
-	points := make([]activity.Sample, 0, len(a.Samples))
+type distanceChartPoint struct {
+	distance float64
+	value    activity.Value
+}
+
+func prepareDistanceChartPoints(a *activity.Activity, name string) ([]distanceChartPoint, bool) {
+	points := make([]distanceChartPoint, 0, len(a.Samples))
 	for _, sample := range a.Samples {
-		if odo := sampleOdometer(sample); odo.Valid {
-			if len(points) > 0 && odo.Number < sampleOdometer(points[len(points)-1]).Number {
-				return values, 0
-			}
-			points = append(points, sample)
+		odo := sampleOdometer(sample)
+		if !odo.Valid {
+			continue
 		}
+		if len(points) > 0 && odo.Number < points[len(points)-1].distance {
+			return nil, false
+		}
+		value, _ := metrics.ValueAt(sample, name)
+		points = append(points, distanceChartPoint{distance: odo.Number, value: value})
+	}
+	return points, true
+}
+
+func distanceChartValues(points []distanceChartPoint, monotonic bool, currentOdo activity.Value, distance float64, samples int, name, units string) ([]activity.Value, float64) {
+	return distanceChartValuesInto(nil, points, monotonic, currentOdo, distance, samples, name, units)
+}
+
+func distanceChartValuesInto(dst []activity.Value, points []distanceChartPoint, monotonic bool, currentOdo activity.Value, distance float64, samples int, name, units string) ([]activity.Value, float64) {
+	values := chartValuesBuffer(dst, samples)
+	if !monotonic {
+		clear(values)
+		return values, 0
 	}
 	if len(points) == 0 {
+		clear(values)
 		return values, 0
 	}
 	if !currentOdo.Valid {
+		clear(values)
 		return values, 0
 	}
-	minimum, maximum := sampleOdometer(points[0]).Number, sampleOdometer(points[len(points)-1]).Number
+	minimum, maximum := points[0].distance, points[len(points)-1].distance
 	span := math.Min(distance, maximum-minimum)
 	start := math.Max(minimum, math.Min(currentOdo.Number-span/2, maximum-span))
 	step := 0.0
@@ -227,18 +365,24 @@ func distanceChartValues(a *activity.Activity, currentOdo activity.Value, distan
 	}
 	for i := range values {
 		target := start + float64(i)*step
-		index := sort.Search(len(points), func(j int) bool { return sampleOdometer(points[j]).Number >= target })
-		if index > 0 && (index == len(points) || target-sampleOdometer(points[index-1]).Number < sampleOdometer(points[index]).Number-target) {
+		index := sort.Search(len(points), func(j int) bool { return points[j].distance >= target })
+		if index > 0 && (index == len(points) || target-points[index-1].distance < points[index].distance-target) {
 			index--
 		}
-		value, _ := metrics.ValueAt(points[index], name)
-		values[i] = convert(value, units, name)
+		values[i] = convert(points[index].value, units, name)
 	}
 	marker := 0.0
 	if step > 0 {
 		marker = (currentOdo.Number - start) / step
 	}
 	return values, marker
+}
+
+func chartValuesBuffer(dst []activity.Value, samples int) []activity.Value {
+	if cap(dst) < samples {
+		return make([]activity.Value, samples)
+	}
+	return dst[:samples]
 }
 
 func sampleOdometer(sample activity.Sample) activity.Value {

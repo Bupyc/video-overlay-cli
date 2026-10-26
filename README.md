@@ -53,6 +53,8 @@ Check the available commands and flags:
 
 ## Quick start
 
+A render defaults to 1920×1080 at 10 fps with a black background and the `black-h264` profile. Select an alpha profile and transparent background when you need transparency.
+
 Export a standalone transparent overlay from a running activity:
 
 ```sh
@@ -75,7 +77,7 @@ Export an opaque overlay on black:
   --background black --profile black-h264
 ```
 
-For a compressed transparent MOV on macOS, select `alpha-hevc` instead of the default `alpha-prores`:
+For a compressed transparent MOV on macOS, select `alpha-hevc`:
 
 ```sh
 ./video-overlay-cli render \
@@ -143,12 +145,12 @@ The required inputs are an activity file, an XML layout, and an output path.
 | `--output PATH` | — | Output video path. Keep it separate from all input paths. |
 | `--size WxH` | `1920x1080` | Output frame dimensions. |
 | `--fps N` | `10` | Output frame rate. |
-| `--background MODE` | `transparent` | `transparent` or `black`. |
-| `--profile NAME` | `alpha-prores` | `alpha-prores`, `alpha-hevc`, `alpha-vp9`, or `black-h264` (built-in `yuv420p` output requires even frame dimensions). HEVC alpha requires macOS VideoToolbox; VP9 alpha requires `libvpx-vp9`. |
+| `--background MODE` | `black` | `transparent` or `black`. |
+| `--profile NAME` | `black-h264` | `alpha-prores`, `alpha-hevc`, `alpha-vp9`, or `black-h264` (built-in `yuv420p` output requires even frame dimensions). HEVC alpha requires macOS VideoToolbox; VP9 alpha requires `libvpx-vp9`. |
 | `--ffmpeg-profile NAME` | — | Load named user settings from `ffmpeg-profiles.json`. |
 | `--ffmpeg-profiles PATH` | `video-overlay-cli/ffmpeg-profiles.json` in user config | Path to the JSON profile file; requires `--ffmpeg-profile`. |
 | `--ffmpeg-arg ARG` | — | Extra output argument; repeat once per FFmpeg argument token. Applied after the selected encoder and named profile settings. |
-| `--workers N` | automatic | Maximum number of frame-rendering workers; transparent mode adapts active workers up to this limit. |
+| `--workers N` | auto, up to 4 | Maximum number of frame-rendering workers; explicit values override the auto limit. Transparent mode adapts active workers up to this limit. |
 | `--font PATH` | system fallback | Font file used by text widgets. |
 | `--ffmpeg PATH` | `ffmpeg` | FFmpeg executable. |
 | `--video PATH` | — | Optional source video to composite under the overlay. |

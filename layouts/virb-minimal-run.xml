@@ -1,0 +1,199 @@
+<layout>
+
+    <!-- ВРЕМЯ / ТАЙМЕР -->
+    <composite x="30" y="24" name="timer_block">
+        <component type="metric"
+                x="34" y="-2"
+                metric="timestamp"
+                format="duration"
+                size="26"
+                rgb="140,235,255,240"
+                outline="20,80,120,180"
+                outline_width="2"/>
+    </composite>
+
+    <!-- НИТКА МАРШРУТА -->
+    <composite x="1650" y="24" name="track_block">
+        <component type="circuit_map"
+                   size="210"
+                   fill="120,235,255,255"
+                   outline="255,255,255,230"
+                   fill_width="4"
+                   outline_width="2"/>
+    </composite>
+
+    <!-- ЛЕВЫЙ НИЖНИЙ HUD-БЛОК: CHART КАК ПОЛУПРОЗРАЧНЫЙ ФОН -->
+    <composite x="24" y="925" name="alt_chart_panel">
+        <component type="chart"
+                name="altitude_chart"
+                x="0"
+                y="0"
+                metric="alt"
+                units="m"
+                width="560"
+                height="150"
+                seconds="1800"
+                line="215,245,255,230"
+                fill="120,130,140,75"
+                bg="0,0,0,0"
+                text="140,235,255,0"
+                textsize="12"
+                marker-size="5"
+                values="false"
+                filled="true"/>
+    </composite>
+
+    <!-- МЕТРИКИ ПОВЕРХ CHART -->
+    <composite x="48" y="935" name="left_stats">
+
+        <!-- ПУЛЬС -->
+        <component type="text"
+                   x="0" y="2"
+                   size="17"
+                   rgb="120,235,255,230"
+                   outline="0,35,70,190"
+                   outline_width="2">HR</component>
+
+        <component type="metric"
+                   x="42" y="-4"
+                   metric="hr"
+                   format=".0f"
+                   size="30"
+                   rgb="245,252,255,248"
+                   outline="0,35,70,210"
+                   outline_width="2"/>
+
+        <!-- ВЫСОТА -->
+        <component type="text"
+                   x="126" y="2"
+                   size="17"
+                   rgb="120,235,255,230"
+                   outline="0,35,70,190"
+                   outline_width="2">ALT</component>
+
+        <component type="metric"
+                   x="174" y="-4"
+                   metric="alt"
+                   units="m"
+                   format=".0f"
+                   size="30"
+                   rgb="245,252,255,248"
+                   outline="0,35,70,210"
+                   outline_width="2"/>
+
+        <component type="text"
+                   x="238" y="0"
+                   size="18"
+                   rgb="140,235,255,220"
+                   outline="0,35,70,190"
+                   outline_width="2">м</component>
+
+        <!-- ВЕРТИКАЛЬНАЯ СКОРОСТЬ -->
+        <component type="text"
+                   x="300" y="2"
+                   size="17"
+                   rgb="120,235,255,230"
+                   outline="0,35,70,190"
+                   outline_width="2">VSPD</component>
+
+        <component type="metric"
+                   x="350" y="-4"
+                   metric="vertical_speed"
+                   units="m/h"
+                   format=".0f"
+                   size="30"
+                   rgb="245,252,255,248"
+                   outline="0,35,70,210"
+                   outline_width="2"/>
+
+        <component type="text"
+                   x="425" y="0"
+                   size="15"
+                   rgb="140,235,255,220"
+                   outline="0,35,70,190"
+                   outline_width="2">м/ч</component>
+
+        <!-- УКЛОН ВСТРОЕН В ПРАВЫЙ НИЖНИЙ УГОЛ CHART, БЕЗ ПОДПИСИ -->
+        <component type="metric"
+           x="515" y="96"
+           metric="gradient"
+           format=".0f"
+           size="30"
+           align="right"
+           rgb="245,252,255,248"
+           outline="0,35,70,210"
+           outline_width="2"/>
+
+        <component type="text"
+                x="522" y="100"
+                size="18"
+                rgb="140,235,255,220"
+                outline="0,35,70,190"
+                outline_width="2">%</component>
+    </composite>
+
+    <!-- ПРАВЫЙ НИЖНИЙ БЛОК -->
+    <composite x="1860" y="930" name="right_stats">
+
+        <!-- ДИСТАНЦИЯ -->
+        <component type="text"
+                   x="0" y="0"
+                   size="18"
+                   align="right"
+                   rgb="140,235,255,220"
+                   outline="20,80,120,180"
+                   outline_width="2">КМ</component>
+
+        <component type="metric"
+                   x="0" y="24"
+                   metric="odo"
+                   units="km"
+                   format=".1f"
+                   size="30"
+                   align="right"
+                   rgb="240,250,255,245"
+                   outline="20,80,120,180"
+                   outline_width="2"/>
+
+        <!-- ТЕМП -->
+        <component type="text"
+                   x="0" y="78"
+                   size="18"
+                   align="right"
+                   rgb="140,235,255,220"
+                   outline="20,80,120,180"
+                   outline_width="2">ТЕМП</component>
+
+        <component type="metric"
+                   x="0" y="102"
+                   metric="pace"
+                   units="pace_km"
+                   format="pace"
+                   size="36"
+                   align="right"
+                   rgb="240,250,255,245"
+                   outline="20,80,120,180"
+                   outline_width="2"/>
+
+        <!-- СКОРОСТЬ -->
+        <component type="text"
+                   x="0" y="158"
+                   size="18"
+                   align="right"
+                   rgb="140,235,255,220"
+                   outline="20,80,120,180"
+                   outline_width="2">КМ/Ч</component>
+
+        <component type="metric"
+                   x="0" y="182"
+                   metric="speed"
+                   units="kph"
+                   format=".1f"
+                   size="30"
+                   align="right"
+                   rgb="240,250,255,245"
+                   outline="20,80,120,180"
+                   outline_width="2"/>
+    </composite>
+
+</layout>
