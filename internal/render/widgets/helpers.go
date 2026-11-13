@@ -789,6 +789,10 @@ func metricText(value activity.Value, units, format string, metricName string) s
 	if !value.Valid {
 		return "—"
 	}
+	if metricName == "elapsed" && format == "" {
+		seconds := int64(value.Number)
+		return fmt.Sprintf("%02d:%02d:%02d", seconds/3600, seconds/60%60, seconds%60)
+	}
 	if format == "pace" || strings.Contains(strings.ToLower(units), "pace") {
 		seconds := int(math.Ceil(value.Number * 60))
 		return fmt.Sprintf("%d:%02d", seconds/60, seconds%60)

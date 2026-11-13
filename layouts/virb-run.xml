@@ -11,6 +11,18 @@
                 outline_width="1"/>
     </composite>
 
+    <!-- ВРЕМЯ ОТ СТАРТА -->
+    <composite x="1470" y="24" name="elapsed_block">
+        <component type="metric"
+                   x="420" y="-2"
+                   metric="elapsed"
+                   size="26"
+                   align="right"
+                   rgb="140,235,255,240"
+                   outline="20,80,120,180"
+                   outline_width="1"/>
+    </composite>
+
     <!-- НИТКА МАРШРУТА -->
     <composite x="1470" y="24" name="track_block">
         <component type="circuit_map"

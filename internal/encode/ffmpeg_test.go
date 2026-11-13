@@ -153,6 +153,28 @@ func TestArgsEncodeAlphaVP9(t *testing.T) {
 	}
 }
 
+func TestArgsStoreTimecodeAsWebMMetadata(t *testing.T) {
+	options, err := (Options{
+		Output: "overlay.webm", Width: 2, Height: 2, FPS: 10,
+		OutputFPS: "30000/1001",
+		Profile:   AlphaVP9, Transparent: true,
+		CreationTime: time.Date(2025, 1, 1, 8, 1, 0, 0, time.UTC),
+	}).validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := args(options, "rgba")
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "-metadata timecode=08:01:00;02") {
+		t.Fatalf("WebM args do not contain the SMPTE timecode metadata:\n%s", joined)
+	}
+	for i, arg := range got {
+		if arg == "-timecode" {
+			t.Fatalf("WebM args request an unsupported timecode track at argument %d:\n%s", i, joined)
+		}
+	}
+}
+
 func TestArgsApplyCustomFFmpegProfileAndArguments(t *testing.T) {
 	options := Options{
 		Output: "overlay.webm", Video: "source.mov", Width: 2, Height: 2, FPS: 10,

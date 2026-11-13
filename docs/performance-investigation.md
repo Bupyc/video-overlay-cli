@@ -104,6 +104,18 @@ The previous converter wrote Y into the RGBA allocation, kept U/V in scratch, th
 
 Keep the exact blend rewrite for its isolated measured gain and exhaustive equivalence check, but do not present it as a whole-render speedup. The pipe and YUV converter remain the larger targets; master-to-writer batching has already been tested without gain.
 
+## Rejected experiment: PNG frame input — 2026-10-26
+
+The experimental path encoded RGBA frames as PNG in Go workers before sending them to FFmpeg. It was removed because the compression cost outweighed the reduced pipe traffic. Measurements used `benchmark-slow-trail.gpx`, `virb-run.xml`, 1,800 frames at 1920×1080/10 fps, black H.264, and 8 workers; raw and PNG runs were averaged over two runs. CPU samples use `ps` every 100 ms; 100% is about one core.
+
+| Input | FPS | Go CPU | FFmpeg CPU | Approx. CPU time for 1,800 frames |
+|---|---:|---:|---:|---:|
+| raw YUV420P | 751 | 133% | 431% | 13.5 core-s |
+| PNG BestSpeed | 291 | 537% | 404% | 58 core-s |
+| PNG NoCompression | 359 | 229% | 333% | 28 core-s |
+
+Even uncompressed PNG was less than half as fast as raw YUV420P and used about twice the total CPU time. BestSpeed compressed a black 1920×1080 frame to about 119 KB, but Go encoding alone consumed 537% CPU in the full render. The tested buffer pool and alternative Go PNG encoder did not improve end-to-end performance; no tested encoder approached the raw path. PNG frame input is not supported in the CLI.
+
 ## Already checked — do not repeat without a new hypothesis
 
 - Master reorder/send consumed about 10 ms in the 62-widget profile; writer queue wait was about 53 ms total. Queue handoff was not a measured CPU hotspot.

@@ -9,6 +9,7 @@ type Value struct {
 
 type Sample struct {
 	Timestamp          time.Time
+	CustomFieldValues  []Value
 	Latitude           Value
 	Longitude          Value
 	Distance           Value
@@ -27,6 +28,7 @@ type Sample struct {
 	LongSpeed          Value
 	DistanceDelta      Value
 	Elapsed            Value
+	ElapsedSinceStart  Value
 	Azimuth            Value
 	Course             Value
 	Acceleration       Value
@@ -51,7 +53,9 @@ type Sample struct {
 }
 
 type Activity struct {
-	Samples []Sample
-	Start   time.Time
-	End     time.Time
+	Samples            []Sample
+	Start              time.Time
+	End                time.Time
+	CustomFieldIndices map[string]int
+	CustomFieldValues  []Value
 }

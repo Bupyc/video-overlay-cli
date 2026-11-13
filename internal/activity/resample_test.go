@@ -79,7 +79,7 @@ func TestResampleKeepsSingleSample(t *testing.T) {
 	if err := Resample(a, 10); err != nil {
 		t.Fatal(err)
 	}
-	if len(a.Samples) != 1 || a.Samples[0] != sample {
+	if len(a.Samples) != 1 || !reflect.DeepEqual(a.Samples[0], sample) {
 		t.Fatalf("single sample changed: %+v", a.Samples)
 	}
 }

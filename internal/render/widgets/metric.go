@@ -17,8 +17,14 @@ func metricFactory(element *layout.Element, setup *render.Context) (render.Drawe
 	if name == "" {
 		return nil, fmt.Errorf("metric component requires metric")
 	}
-	if _, _, err := metric(setup, element); err != nil {
+	customField, err := boolAttr(element, "custom_field", false)
+	if err != nil {
 		return nil, err
+	}
+	if !customField {
+		if _, _, err := metric(setup, element); err != nil {
+			return nil, err
+		}
 	}
 	size, err := floatAttr(element, "size", 16)
 	if err != nil || size <= 0 {
@@ -50,7 +56,9 @@ func metricFactory(element *layout.Element, setup *render.Context) (render.Drawe
 	}
 	units := attr(element, "units", "")
 	conversionMetric := name
-	if name == "pace" {
+	if customField {
+		conversionMetric = "custom"
+	} else if name == "pace" {
 		// The pace accessor selects a speed in m/s; render it with speed-to-pace conversion.
 		conversionMetric = "speed"
 	}
@@ -59,6 +67,9 @@ func metricFactory(element *layout.Element, setup *render.Context) (render.Drawe
 	if cache {
 		lookahead = func(ctx *render.Context, current string, done <-chan struct{}, prefetch func(string) bool) {
 			prefetchFutureLabels(ctx, current, func(sample activity.Sample) string {
+				if customField {
+					return metricText(customMetricValue(ctx.Activity, sample, name), units, format, conversionMetric)
+				}
 				value, err := metrics.ValueAt(sample, name)
 				if err != nil {
 					return ""
@@ -68,14 +79,37 @@ func metricFactory(element *layout.Element, setup *render.Context) (render.Drawe
 		}
 	}
 	return func(ctx *render.Context) error {
-		value, _, err := metric(ctx, element)
-		if err != nil {
-			return err
+		var value activity.Value
+		if customField {
+			value = customMetricValue(ctx.Activity, ctx.Sample, name)
+		} else {
+			metricValue, _, metricErr := metric(ctx, element)
+			if metricErr != nil {
+				return metricErr
+			}
+			value = metricValue
 		}
 		text := metricText(value, units, format, conversionMetric)
 		drawTextWithLookahead(ctx, 0, ascent, size, text, align, fill, outline, outlineWidth, cache, lookahead)
 		return nil
 	}, nil
+}
+
+func customMetricValue(a *activity.Activity, sample activity.Sample, name string) activity.Value {
+	if a == nil {
+		return activity.Value{}
+	}
+	index, ok := a.CustomFieldIndices[name]
+	if !ok {
+		return activity.Value{}
+	}
+	if index < len(sample.CustomFieldValues) && sample.CustomFieldValues[index].Valid {
+		return sample.CustomFieldValues[index]
+	}
+	if index < len(a.CustomFieldValues) {
+		return a.CustomFieldValues[index]
+	}
+	return activity.Value{}
 }
 
 func metricUnitFactory(element *layout.Element, setup *render.Context) (render.Drawer, error) {

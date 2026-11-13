@@ -43,13 +43,14 @@ func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	flags := flag.NewFlagSet("render", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() {
-		fmt.Fprint(stdout, "Usage: video-overlay-cli render [options]\n\nOptions:\n  --activity PATH       FIT or GPX activity file\n  --layout PATH         XML overlay layout\n  --output PATH         output video path\n  --size WxH            frame size (default 1920x1080)\n  --fps N               output frame rate (default 10)\n  --background MODE     transparent or black (default black)\n  --profile NAME        alpha-prores, alpha-hevc, alpha-vp9, or black-h264 (default black-h264)\n  --ffmpeg-profile NAME named profile from ffmpeg-profiles.json\n  --ffmpeg-profiles PATH profile file (default user config/video-overlay-cli)\n  --ffmpeg-arg ARG      extra output argument; repeat to pass multiple values\n  --workers N           max render workers (default up to 4, limited by GOMAXPROCS)\n  --font PATH           font file\n  --ffmpeg PATH         ffmpeg executable (default ffmpeg)\n  --video PATH          optional source video for composition\n  --video-offset SEC    overlay start offset in seconds (default 0)\n  --privacy LAT,LON,KM  hide map details within a radius\n  --tile-url TEMPLATE  tile URL with {z}, {x}, {y} placeholders\n  --tile-cache PATH     persistent map tile cache (default OS cache dir)\n  --tile-attribution T  attribution text shown on map widgets\n")
+		fmt.Fprint(stdout, "Usage: video-overlay-cli render [options]\n\nOptions:\n  --activity PATH       FIT or GPX activity file\n  --layout PATH         XML overlay layout\n  --output PATH         output video path\n  --size WxH            frame size (default 1920x1080)\n  --fps N               Go render frame rate (default 10)\n  --output-fps N[/D]    FFmpeg output frame rate (default input rate)\n  --background MODE     transparent or black (default black)\n  --profile NAME        alpha-prores, alpha-hevc, alpha-vp9, or black-h264 (default black-h264)\n  --ffmpeg-profile NAME named profile from ffmpeg-profiles.json\n  --ffmpeg-profiles PATH profile file (default user config/video-overlay-cli)\n  --ffmpeg-arg ARG      extra output argument; repeat to pass multiple values\n  --workers N           max render workers (default up to 4, limited by GOMAXPROCS)\n  --font PATH           font file\n  --ffmpeg PATH         ffmpeg executable (default ffmpeg)\n  --video PATH          optional source video for composition\n  --video-offset SEC    overlay start offset in seconds (default 0)\n  --privacy LAT,LON,KM  hide map details within a radius\n  --tile-url TEMPLATE  tile URL with {z}, {x}, {y} placeholders\n  --tile-cache PATH     persistent map tile cache (default OS cache dir)\n  --tile-attribution T  attribution text shown on map widgets\n")
 	}
 	activityPath := flags.String("activity", "", "FIT or GPX activity file")
 	layoutPath := flags.String("layout", "", "XML overlay layout")
 	outputPath := flags.String("output", "", "output video path")
 	size := flags.String("size", "1920x1080", "frame size")
-	fps := flags.Float64("fps", 10, "output frame rate")
+	fps := flags.Float64("fps", 10, "Go render frame rate")
+	outputFPS := flags.String("output-fps", "", "FFmpeg output frame rate (e.g. 29.97 or 30000/1001; default input rate)")
 	background := flags.String("background", "black", "transparent or black")
 	profile := flags.String("profile", "black-h264", "alpha-prores, alpha-hevc, alpha-vp9, or black-h264")
 	ffmpegProfileName := flags.String("ffmpeg-profile", "", "named profile from ffmpeg-profiles.json")
@@ -73,6 +74,9 @@ func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return err
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := encode.ValidateOutputFPS(*outputFPS); err != nil {
 		return err
 	}
 	var ffmpegProfile encode.FFmpegProfile
@@ -168,19 +172,6 @@ func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) err
 			stageStarted = time.Now()
 		}
 	}
-	act, err := activity.Load(*activityPath)
-	markStage("activity.load")
-	if err != nil {
-		return err
-	}
-	if err := activity.Resample(act, 10); err != nil {
-		return fmt.Errorf("resample activity: %w", err)
-	}
-	markStage("activity.resample")
-	if err := metrics.Process(act, metrics.Profile{}); err != nil {
-		return fmt.Errorf("prepare activity metrics: %w", err)
-	}
-	markStage("metrics.process")
 	layoutFile, err := os.Open(*layoutPath)
 	if err != nil {
 		return fmt.Errorf("open layout %q: %w", *layoutPath, err)
@@ -194,6 +185,19 @@ func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return fmt.Errorf("close layout %q: %w", *layoutPath, closeErr)
 	}
 	markStage("layout.parse")
+	act, err := activity.Load(*activityPath, customMetricFieldNames(doc)...)
+	markStage("activity.load")
+	if err != nil {
+		return err
+	}
+	if err := activity.Resample(act, 10); err != nil {
+		return fmt.Errorf("resample activity: %w", err)
+	}
+	markStage("activity.resample")
+	if err := metrics.Process(act, metrics.Profile{}); err != nil {
+		return fmt.Errorf("prepare activity metrics: %w", err)
+	}
+	markStage("metrics.process")
 	frames, err := frameCount(act.End.Sub(act.Start), *fps)
 	if err != nil {
 		return err
@@ -216,10 +220,14 @@ func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	}
 	ffmpegCtx, stopFFmpeg := context.WithCancel(context.WithoutCancel(encodeCtx))
 	defer stopFFmpeg()
+	creationTime := time.Time{}
+	if *videoPath == "" {
+		creationTime = act.Start
+	}
 	encoder, err := encode.Start(ffmpegCtx, encode.Options{
 		FFmpeg: *ffmpegPath, Output: *outputPath, Width: width, Height: height,
 		Video: *videoPath, VideoOffset: *videoOffset,
-		FPS: *fps, Profile: encode.Profile(*profile), FFmpegProfile: ffmpegProfile, FFmpegArgs: ffmpegArgs,
+		FPS: *fps, OutputFPS: *outputFPS, Profile: encode.Profile(*profile), CreationTime: creationTime, FFmpegProfile: ffmpegProfile, FFmpegArgs: ffmpegArgs,
 		Transparent: mode == render.Transparent,
 	})
 	if err != nil {
@@ -249,8 +257,42 @@ func runRender(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return errors.Join(renderErr, encodeErr)
 	}
 	elapsed := time.Since(renderStarted)
-	_, err = fmt.Fprintf(stdout, "Wrote %s (%d frames, elapsed %s, avg %.1f fps)\n", *outputPath, frames, elapsed.Round(time.Second), float64(frames)/elapsed.Seconds())
+	_, err = fmt.Fprintf(stdout, "Wrote %s (%d rendered frames, elapsed %s, avg render %.1f fps)\n", *outputPath, frames, elapsed.Round(time.Second), float64(frames)/elapsed.Seconds())
 	return err
+}
+
+func customMetricFieldNames(doc *layout.Document) []string {
+	if doc == nil || doc.Root == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var names []string
+	var visit func(*layout.Element)
+	visit = func(element *layout.Element) {
+		if layout.NormalizeType(layoutAttribute(element, "type")) == "metric" && strings.EqualFold(layoutAttribute(element, "custom_field"), "true") {
+			name := layoutAttribute(element, "metric")
+			if name != "" {
+				if _, ok := seen[name]; !ok {
+					seen[name] = struct{}{}
+					names = append(names, name)
+				}
+			}
+		}
+		for _, child := range element.Children {
+			visit(child)
+		}
+	}
+	visit(doc.Root)
+	return names
+}
+
+func layoutAttribute(element *layout.Element, name string) string {
+	for _, attribute := range element.Attributes {
+		if attribute.Name == name {
+			return attribute.Value
+		}
+	}
+	return ""
 }
 
 type stringListFlag []string

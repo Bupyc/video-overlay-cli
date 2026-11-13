@@ -10,6 +10,7 @@ import (
 	"github.com/muktihari/fit/decoder"
 	"github.com/muktihari/fit/kit/datetime"
 	"github.com/muktihari/fit/profile/basetype"
+	"github.com/muktihari/fit/profile/mesgdef"
 	"github.com/muktihari/fit/profile/typedef"
 	"github.com/muktihari/fit/proto"
 )
@@ -20,20 +21,44 @@ type gearEvent struct {
 	rear      Value
 }
 
-func loadFIT(r io.Reader) (*Activity, error) {
+type developerFieldKey struct {
+	index  uint8
+	number uint8
+}
+
+type developerFieldDescription struct {
+	name     string
+	baseType basetype.BaseType
+	scale    uint8
+	offset   int8
+}
+
+func loadFIT(r io.Reader, customFieldIndices map[string]int) (*Activity, error) {
 	decoded, err := decoder.New(r).Decode()
 	if err != nil {
 		return nil, fmt.Errorf("decode FIT: %w", err)
 	}
+	developerFields, err := fitDeveloperFieldDescriptions(decoded.Messages, customFieldIndices)
+	if err != nil {
+		return nil, err
+	}
 	samples := make([]Sample, 0, len(decoded.Messages)/4)
 	gearEvents := make([]gearEvent, 0)
+	activityCustomFields := make([]Value, len(customFieldIndices))
 	for i := range decoded.Messages {
 		message := &decoded.Messages[i]
 		switch message.Num.String() {
 		case "record":
-			sample, ok := parseFITRecord(message)
+			sample, ok := parseFITRecord(message, customFieldIndices, developerFields)
 			if ok {
 				samples = append(samples, sample)
+			}
+		case "session":
+			values := fitCustomFieldValues(message, customFieldIndices, developerFields)
+			for i, v := range values {
+				if v.Valid {
+					activityCustomFields[i] = v
+				}
 			}
 		case "event":
 			event, ok := parseFITGearEvent(message)
@@ -48,10 +73,80 @@ func loadFIT(r io.Reader) (*Activity, error) {
 	sort.SliceStable(gearEvents, func(i, j int) bool { return gearEvents[i].timestamp.Before(gearEvents[j].timestamp) })
 	sort.SliceStable(samples, func(i, j int) bool { return samples[i].Timestamp.Before(samples[j].Timestamp) })
 	applyGearEvents(samples, gearEvents)
-	return orderedActivity(samples)
+	a, err := orderedActivity(samples)
+	if err != nil {
+		return nil, err
+	}
+	a.CustomFieldIndices = customFieldIndices
+	a.CustomFieldValues = activityCustomFields
+	return a, nil
 }
 
-func parseFITRecord(message *proto.Message) (Sample, bool) {
+func fitDeveloperFieldDescriptions(messages []proto.Message, indices map[string]int) (map[developerFieldKey]developerFieldDescription, error) {
+	if len(indices) == 0 {
+		return nil, nil
+	}
+	descriptions := make(map[developerFieldKey]developerFieldDescription)
+	names := make(map[string]developerFieldKey)
+	for i := range messages {
+		if messages[i].Num.String() != "field_description" {
+			continue
+		}
+		field := mesgdef.NewFieldDescription(&messages[i])
+		if len(field.FieldName) != 1 || field.FieldName[0] == "" {
+			continue
+		}
+		name := field.FieldName[0]
+		if _, ok := indices[name]; !ok {
+			continue
+		}
+		key := developerFieldKey{index: field.DeveloperDataIndex, number: field.FieldDefinitionNumber}
+		if previous, ok := names[name]; ok && previous != key {
+			return nil, fmt.Errorf("custom FIT field %q is ambiguous: multiple Developer Data fields use that name", name)
+		}
+		names[name] = key
+		descriptions[key] = developerFieldDescription{
+			name: name, baseType: field.FitBaseTypeId, scale: field.Scale, offset: field.Offset,
+		}
+	}
+	return descriptions, nil
+}
+
+func fitCustomFieldValues(message *proto.Message, indices map[string]int, descriptions map[developerFieldKey]developerFieldDescription) []Value {
+	if len(indices) == 0 {
+		return nil
+	}
+	values := make([]Value, len(indices))
+	for _, field := range message.Fields {
+		index, requested := indices[field.Name]
+		if !requested {
+			continue
+		}
+		if number, ok := fitFieldNumber(&field); ok {
+			values[index] = value(number)
+		}
+	}
+	for _, field := range message.DeveloperFields {
+		description, ok := descriptions[developerFieldKey{index: field.DeveloperDataIndex, number: field.Num}]
+		if !ok {
+			continue
+		}
+		index := indices[description.name]
+		base := &proto.FieldBase{BaseType: description.baseType}
+		if description.scale != uint8(basetype.Uint8Invalid) {
+			base.Scale = float64(description.scale)
+		}
+		if description.offset != int8(basetype.Sint8Invalid) {
+			base.Offset = float64(description.offset)
+		}
+		if number, ok := fitFieldNumber(&proto.Field{FieldBase: base, Value: field.Value}); ok {
+			values[index] = value(number)
+		}
+	}
+	return values
+}
+
+func parseFITRecord(message *proto.Message, customFieldIndices map[string]int, developerFields map[developerFieldKey]developerFieldDescription) (Sample, bool) {
 	timestamp, ok := fitTime(message, "timestamp")
 	if !ok {
 		return Sample{}, false
@@ -62,10 +157,11 @@ func parseFITRecord(message *proto.Message) (Sample, bool) {
 		return Sample{}, false
 	}
 	sample := Sample{
-		Timestamp: timestamp,
-		Latitude:  value(lat * 180 / float64(1<<31)),
-		Longitude: value(lon * 180 / float64(1<<31)),
-		GPSFix:    value(3),
+		Timestamp:         timestamp,
+		Latitude:          value(lat * 180 / float64(1<<31)),
+		Longitude:         value(lon * 180 / float64(1<<31)),
+		GPSFix:            value(3),
+		CustomFieldValues: fitCustomFieldValues(message, customFieldIndices, developerFields),
 	}
 	for _, field := range message.Fields {
 		number, ok := fitFieldNumber(&field)

@@ -44,6 +44,12 @@ func interpolateSample(start, end Sample, at time.Time) Sample {
 	result := start
 	result.Timestamp = at
 	position := float64(at.Sub(start.Timestamp)) / float64(end.Timestamp.Sub(start.Timestamp))
+	result.CustomFieldValues = make([]Value, len(start.CustomFieldValues))
+	for i, startValue := range start.CustomFieldValues {
+		if i < len(end.CustomFieldValues) {
+			result.CustomFieldValues[i] = interpolateValue(startValue, end.CustomFieldValues[i], position)
+		}
+	}
 	result.Latitude = interpolateValue(start.Latitude, end.Latitude, position)
 	result.Longitude = interpolateValue(start.Longitude, end.Longitude, position)
 	result.Distance = interpolateValue(start.Distance, end.Distance, position)
@@ -62,6 +68,7 @@ func interpolateSample(start, end Sample, at time.Time) Sample {
 	result.LongSpeed = interpolateValue(start.LongSpeed, end.LongSpeed, position)
 	result.DistanceDelta = interpolateValue(start.DistanceDelta, end.DistanceDelta, position)
 	result.Elapsed = interpolateValue(start.Elapsed, end.Elapsed, position)
+	result.ElapsedSinceStart = interpolateValue(start.ElapsedSinceStart, end.ElapsedSinceStart, position)
 	result.Azimuth = interpolateValue(start.Azimuth, end.Azimuth, position)
 	result.Course = interpolateValue(start.Course, end.Course, position)
 	result.Acceleration = interpolateValue(start.Acceleration, end.Acceleration, position)

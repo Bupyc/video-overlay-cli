@@ -45,6 +45,9 @@ func Process(a *activity.Activity, profile Profile) error {
 	if a.End.IsZero() {
 		a.End = a.Samples[len(a.Samples)-1].Timestamp
 	}
+	for i := range a.Samples {
+		a.Samples[i].ElapsedSinceStart = activity.Value{Number: a.Samples[i].Timestamp.Sub(a.Start).Seconds(), Valid: true}
+	}
 
 	smoothPositions(a.Samples)
 	processCadence(a.Samples, profile.Sport)
@@ -355,6 +358,8 @@ func ValueAt(sample activity.Sample, name string) (activity.Value, error) {
 		return sample.DistanceDelta, nil
 	case "time":
 		return sample.Elapsed, nil
+	case "elapsed":
+		return sample.ElapsedSinceStart, nil
 	case "azi":
 		return sample.Azimuth, nil
 	case "cog":

@@ -78,7 +78,7 @@ func TestRunPrintsRootAndRenderHelp(t *testing.T) {
 	if err := Run(context.Background(), []string{"render", "--help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("render help returned an error: %v", err)
 	}
-	for _, flag := range []string{"--activity", "--layout", "--output", "--size", "--fps", "--background", "--profile", "--ffmpeg-profile", "--ffmpeg-profiles", "--ffmpeg-arg", "--workers", "--font", "--ffmpeg", "--video", "--video-offset", "--privacy", "--tile-url", "--tile-cache", "--tile-attribution"} {
+	for _, flag := range []string{"--activity", "--layout", "--output", "--size", "--fps", "--output-fps", "--background", "--profile", "--ffmpeg-profile", "--ffmpeg-profiles", "--ffmpeg-arg", "--workers", "--font", "--ffmpeg", "--video", "--video-offset", "--privacy", "--tile-url", "--tile-cache", "--tile-attribution"} {
 		if !strings.Contains(stdout.String(), flag) {
 			t.Errorf("render help does not include %s: %q", flag, stdout.String())
 		}
@@ -99,6 +99,10 @@ func TestRunPrintsRootAndRenderHelp(t *testing.T) {
 func TestRunRenderDefaultsToBlackH264(t *testing.T) {
 	dir := t.TempDir()
 	activityPath, layoutPath := writeCLIInputs(t, dir, `<layout/>`)
+	activitySource := `<gpx><trk><trkseg><trkpt lat="37" lon="-122"><time>2025-01-01T11:01:00+03:00</time></trkpt><trkpt lat="37.0001" lon="-122"><time>2025-01-01T11:01:00.5+03:00</time></trkpt></trkseg></trk></gpx>`
+	if err := os.WriteFile(activityPath, []byte(activitySource), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	argsPath, rawPath := filepath.Join(dir, "args.txt"), filepath.Join(dir, "frames.yuv")
 	ffmpegPath := filepath.Join(dir, "ffmpeg")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argsPath + "'\ncat > '" + rawPath + "'\n"
@@ -108,7 +112,7 @@ func TestRunRenderDefaultsToBlackH264(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{
 		"render", "--activity", activityPath, "--layout", layoutPath, "--output", filepath.Join(dir, "overlay.mp4"),
-		"--size", "2x2", "--fps", "4", "--workers", "1", "--ffmpeg", ffmpegPath,
+		"--size", "2x2", "--fps", "4", "--output-fps", "30000/1001", "--workers", "1", "--ffmpeg", ffmpegPath,
 	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("Run returned %v (stderr %q)", err, stderr.String())
@@ -116,6 +120,12 @@ func TestRunRenderDefaultsToBlackH264(t *testing.T) {
 	args, err := os.ReadFile(argsPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "-metadata\ncreation_time=2025-01-01T08:01:00.000000Z\n") {
+		t.Fatalf("FFmpeg args do not contain the activity start time:\n%s", args)
+	}
+	if !strings.Contains(string(args), "-timecode\n08:01:00;02\n") {
+		t.Fatalf("FFmpeg args do not contain the SMPTE timecode for the output rate:\n%s", args)
 	}
 	for _, arg := range []string{"-pix_fmt\nyuv420p\n", "-c:v\nlibx264\n"} {
 		if !strings.Contains(string(args), arg) {
@@ -149,6 +159,7 @@ func TestRunRenderAppliesCustomFFmpegProfileAndArguments(t *testing.T) {
 		"render", "--activity", activityPath, "--layout", layoutPath, "--output", filepath.Join(dir, "overlay.webm"),
 		"--size", "2x2", "--fps", "4", "--workers", "1", "--background", "transparent", "--profile", "alpha-vp9",
 		"--ffmpeg-profile", "balanced", "--ffmpeg-profiles", profilePath, "--ffmpeg-arg=-cpu-used", "--ffmpeg-arg=3",
+		"--output-fps", "30000/1001",
 		"--ffmpeg", ffmpegPath,
 	}, &stdout, &stderr)
 	if err != nil {
@@ -159,10 +170,24 @@ func TestRunRenderAppliesCustomFFmpegProfileAndArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(args)
-	for _, arg := range []string{"libvpx-vp9", "-crf\n31\n", "-cpu-used\n3\n"} {
+	for _, arg := range []string{"libvpx-vp9", "-crf\n31\n", "-cpu-used\n3\n", "-r\n30000/1001\n-fps_mode\ncfr\n"} {
 		if !strings.Contains(got, arg) {
 			t.Errorf("FFmpeg args missing %q:\n%s", arg, got)
 		}
+	}
+	if !strings.Contains(got, "-framerate\n4\n") {
+		t.Errorf("FFmpeg raw input does not use the Go render rate:\n%s", got)
+	}
+	if !strings.Contains(stdout.String(), "3 rendered frames") {
+		t.Errorf("completion output does not distinguish rendered frames:\n%s", stdout.String())
+	}
+}
+
+func TestRunRejectsInvalidOutputFPS(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"render", "--output-fps", "0"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "output frame rate") {
+		t.Fatalf("Run error = %v, want invalid output frame rate", err)
 	}
 }
 
@@ -194,6 +219,9 @@ func TestRunRenderComposesTransparentOverlayWithExplicitOffset(t *testing.T) {
 	}
 	if !strings.Contains(string(args), "1.25/TB") || !strings.Contains(string(args), videoPath) || !strings.Contains(string(args), "0:a?") {
 		t.Fatalf("FFmpeg args do not describe video composition at +1.25s:\n%s", args)
+	}
+	if strings.Contains(string(args), "creation_time=") || strings.Contains(string(args), "timecode=") || strings.Contains(string(args), "-timecode\n") {
+		t.Fatalf("FFmpeg args override the source video's recording metadata:\n%s", args)
 	}
 	raw, err := os.ReadFile(rawPath)
 	if err != nil || len(raw) != 48 {
@@ -362,7 +390,7 @@ func TestRunRenderStreamsGeneratedFramesToFFmpeg(t *testing.T) {
 	if got, want := len(frames), 5*2*2*4; got != want {
 		t.Fatalf("streamed %d bytes, want %d (five RGBA frames)", got, want)
 	}
-	if !strings.Contains(stdout.String(), fmt.Sprintf("%d frames", 5)) {
+	if !strings.Contains(stdout.String(), fmt.Sprintf("%d rendered frames", 5)) {
 		t.Fatalf("unexpected success output: %q", stdout.String())
 	}
 }

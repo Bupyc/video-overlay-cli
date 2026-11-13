@@ -3,9 +3,12 @@ package encode
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Profile string
@@ -31,7 +34,10 @@ type Options struct {
 	Width         int
 	Height        int
 	FPS           float64
+	OutputFPS     string
 	Profile       Profile
+	CreationTime  time.Time
+	smpteTimecode string
 	FFmpegProfile FFmpegProfile
 	FFmpegArgs    []string
 	Transparent   bool
@@ -52,7 +58,21 @@ func (o Options) validate() (Options, error) {
 		return o, fmt.Errorf("frame size is too large")
 	}
 	if o.FPS <= 0 || math.IsNaN(o.FPS) || math.IsInf(o.FPS, 0) {
-		return o, fmt.Errorf("frame rate must be finite and positive")
+		return o, fmt.Errorf("render frame rate must be finite and positive")
+	}
+	if err := ValidateOutputFPS(o.OutputFPS); err != nil {
+		return o, err
+	}
+	if !o.CreationTime.IsZero() {
+		frameRate := o.OutputFPS
+		if frameRate == "" {
+			frameRate = strconv.FormatFloat(o.FPS, 'f', -1, 64)
+		}
+		timecode, err := smpteTimecode(o.CreationTime, frameRate)
+		if err != nil {
+			return o, fmt.Errorf("generate SMPTE timecode: %w", err)
+		}
+		o.smpteTimecode = timecode
 	}
 	if math.IsNaN(o.VideoOffset) || math.IsInf(o.VideoOffset, 0) {
 		return o, fmt.Errorf("video offset must be finite")
@@ -107,6 +127,17 @@ func (o Options) validate() (Options, error) {
 		return o, fmt.Errorf("unknown encoding profile %q", o.Profile)
 	}
 	return o, nil
+}
+
+func ValidateOutputFPS(value string) error {
+	if value == "" {
+		return nil
+	}
+	rate, ok := new(big.Rat).SetString(value)
+	if !ok || rate.Sign() <= 0 {
+		return fmt.Errorf("output frame rate must be positive (for example 29.97 or 30000/1001)")
+	}
+	return nil
 }
 
 func hasPixelFormatOverride(args []string) bool {

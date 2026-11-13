@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -101,8 +102,21 @@ func args(opts Options, inputPixelFormat string) []string {
 	} else {
 		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p")
 	}
+	if !opts.CreationTime.IsZero() {
+		args = append(args, "-metadata", "creation_time="+opts.CreationTime.UTC().Format("2006-01-02T15:04:05.000000Z"))
+	}
+	if opts.smpteTimecode != "" {
+		args = append(args, "-metadata", "timecode="+opts.smpteTimecode)
+		switch strings.ToLower(filepath.Ext(opts.Output)) {
+		case ".mov", ".mp4", ".m4v":
+			args = append(args, "-timecode", opts.smpteTimecode)
+		}
+	}
 	args = append(args, opts.FFmpegProfile.Output...)
 	args = append(args, opts.FFmpegArgs...)
+	if opts.OutputFPS != "" {
+		args = append(args, "-r", opts.OutputFPS, "-fps_mode", "cfr")
+	}
 	return append(args, opts.Output)
 }
 

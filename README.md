@@ -55,6 +55,8 @@ Check the available commands and flags:
 
 A render defaults to 1920×1080 at 10 fps with a black background and the `black-h264` profile. Select an alpha profile and transparent background when you need transparency.
 
+`--fps` sets the rate of unique telemetry frames rendered by Go; `--output-fps` sets the constant output rate in FFmpeg. For example, `--fps 10 --output-fps 30000/1001` keeps telemetry rendering at 10 fps while producing exact NTSC output; FFmpeg duplicates frames. Standalone exports set `creation_time` and the starting SMPTE timecode from the FIT start; MOV/MP4 store a timecode track, while WebM has a generic metadata tag. See the [usage guide](docs/usage.md) ([Русский](docs/usage.ru.md)).
+
 Export a standalone transparent overlay from a running activity:
 
 ```sh
@@ -118,7 +120,7 @@ These measurements use the checked-in synthetic trail sample and this Mac/FFmpeg
 
 ## Progress and cancellation
 
-In an interactive terminal, the progress bar shows export FPS, elapsed time, the current video time and total duration, and the estimated time remaining. When rendering finishes, the CLI prints total elapsed time and average FPS. Pressing Ctrl+C stops at a frame boundary and asks FFmpeg to finalize the partial output; the resulting video remains readable.
+In an interactive terminal, the progress bar shows Go render FPS, elapsed time, the current video time and total duration, and the estimated time remaining. When rendering finishes, the CLI prints the number of Go-rendered frames, total elapsed time, and average render FPS. Pressing Ctrl+C stops at a frame boundary and asks FFmpeg to finalize the partial output; the resulting video remains readable.
 
 Composite an overlay over an existing video. This uses a transparent render internally and produces a regular H.264 video; telemetry is still read from the FIT/GPX file, not from the video.
 
@@ -144,7 +146,8 @@ The required inputs are an activity file, an XML layout, and an output path.
 | `--layout PATH` | — | XML overlay layout. |
 | `--output PATH` | — | Output video path. Keep it separate from all input paths. |
 | `--size WxH` | `1920x1080` | Output frame dimensions. |
-| `--fps N` | `10` | Output frame rate. |
+| `--fps N` | `10` | Go render rate: unique telemetry frames generated per second. |
+| `--output-fps N[/D]` | Input/source rate | Optional constant output rate enforced by FFmpeg, duplicating or dropping frames as needed. Use `30000/1001` for exact NTSC cadence. |
 | `--background MODE` | `black` | `transparent` or `black`. |
 | `--profile NAME` | `black-h264` | `alpha-prores`, `alpha-hevc`, `alpha-vp9`, or `black-h264` (built-in `yuv420p` output requires even frame dimensions). HEVC alpha requires macOS VideoToolbox; VP9 alpha requires `libvpx-vp9`. |
 | `--ffmpeg-profile NAME` | — | Load named user settings from `ffmpeg-profiles.json`. |
@@ -205,11 +208,11 @@ Custom icon paths are resolved relative to the layout file, then as explicit fil
 
 ## Metrics and trail smoothing
 
-Common `metric` names include `speed`, `pace`, `dist`, `odo`, `alt`, `gradient`, `vertical_speed`, `hr`, `cadence`, `running_cadence`, `power`, `temp`, `time`, `azi`, `cog`, and `gps-lock`. Other fields include raw and smoothed speed, GPS accuracy/position, respiration, and gear data.
+The `metric` attribute uses the exact XML identifiers in the [metric field reference](docs/metrics.md), including aliases and fields that may be unavailable in a given activity. Identifiers such as `speed`, `pace`, and `elapsed` are not translated.
 
 FIT distance is used for gradient only when its full series is valid and nondecreasing. Pace switches from a 3-second to a 30-second speed estimate at paces slower than 20 min/km; time-based gradient and derived vertical speed can use windows up to 120 seconds. Pace is unavailable at speeds of 0.05 m/s or less.
 
-See [metric semantics](docs/metrics.md) for smoothing, units, and calculation details.
+See the [metric field reference](docs/metrics.md) for the full identifier list, units, and calculation details.
 
 ## Maps, tiles, and privacy
 
@@ -220,7 +223,7 @@ Use `--tile-url`, `--tile-cache`, and `--tile-attribution` to configure another 
 ## Documentation and examples
 
 - [Usage details](docs/usage.md) ([Русский](docs/usage.ru.md)) — output modes, composition, fonts, icons, and errors.
-- [Metric semantics](docs/metrics.md) ([Русский](docs/metrics.ru.md)) — derived values and adaptive windows.
+- [Metric field reference](docs/metrics.md) ([Русский](docs/metrics.ru.md)) — field identifiers, availability, units, and calculation details.
 - [Widget matrix](docs/widget-matrix.md) ([Русский](docs/widget-matrix.ru.md)) — XML widget coverage and limitations.
 - [Performance notes](docs/performance.md) ([Русский](docs/performance.ru.md)) — benchmark method, measured results, and limitations.
 - [Notices and attributions](NOTICE.md) ([Русский](NOTICE.ru.md)).

@@ -22,6 +22,20 @@ Overlay-only export is the default. It renders the activity duration without ope
 Without overrides, output is 1920×1080 at 10 fps with a black background and the `black-h264` profile.
 Worker count defaults to automatic, capped at 4 or the available `GOMAXPROCS` value, whichever is lower. Set `--workers N` to override the cap.
 
+`--fps` controls how often Go generates a new telemetry frame. `--output-fps` optionally sets the final constant frame rate in FFmpeg; when it is higher than `--fps`, FFmpeg repeats frames without making Go render more unique images. For an exact NTSC rate, use `--output-fps 30000/1001` (`29.97` is a close decimal approximation). For example, `--fps 10 --output-fps 30000/1001` generates telemetry updates at 10 Hz in a 29.97 fps video. Repeated frames preserve the timeline but do not make the telemetry itself update more often.
+
+On an M4 Pro, a 2h18m FIT with `virb-run.xml`, black-h264, and 8 workers took 1m46s at 10→10 fps and 3m30s at 10→30000/1001 fps. The higher output rate took about 2× longer and raised FFmpeg use from about 5.1 to 9.3 CPU cores; results depend on hardware and layout.
+
+Standalone outputs carry the activity start as `creation_time` and as the starting SMPTE timecode, both derived from the FIT start in UTC. The timecode frame is rounded to the nearest output frame; `--output-fps` therefore determines its frame numbering. Rates such as `30000/1001` use drop-frame notation (`;`); other rates use non-drop notation (`:`). The clip's frame timestamps still start at zero. MOV/MP4 outputs get a timecode track; WebM can carry only a generic `timecode` metadata tag, which some editors may ignore.
+
+| Editor | Relevant synchronization method |
+|---|---|
+| Final Cut Pro | Content Created uses the recording date/time, with about one-second accuracy. |
+| DaVinci Resolve | Sync Bin supports date/time and timecode. |
+| Premiere Pro | Synchronize uses timecode, markers, clip edges, or audio; `creation_time` alone does not provide matching timecode. |
+
+The generated timecode matches footage only when the camera uses time-of-day timecode with the same UTC basis, frame rate, and drop-frame convention. When `--video` is used, the FIT time does not overwrite the source video's recording time or timecode. See [FFmpeg metadata and timecode options](https://ffmpeg.org/ffmpeg.html), [FFmpeg frame-rate options](https://ffmpeg.org/ffmpeg.html#Video-Options), [Final Cut Pro sync](https://support.apple.com/en-ie/guide/final-cut-pro/verc1fabc30/mac), [DaVinci Resolve Sync Bin](https://documents.blackmagicdesign.com/in/UserManuals/DaVinciResolveReplayEditor.pdf?_v=1726642810000), and [Premiere Pro synchronization](https://helpx.adobe.com/premiere/desktop/add-audio-effects/basic-audio-editing/synchronize-clips-in-the-timeline-panel.html).
+
 ```sh
 ./video-overlay-cli render \
   --activity activity.fit \
@@ -96,6 +110,6 @@ Tile-backed maps use OpenStreetMap tiles by default and show attribution. The fi
 
 ## Errors and exit status
 
-In an interactive terminal, the progress bar shows export FPS, elapsed time, current video time out of the total duration, and ETA. A completed export prints its path, frame count, total elapsed time, and average FPS.
+In an interactive terminal, the progress bar shows render FPS, elapsed time, current video time out of the total duration, and ETA. A completed export prints its path, the number of frames rendered by Go, total elapsed time, and average Go render FPS. If `--output-fps` is higher, FFmpeg may write more frames by duplicating these rendered frames.
 
 Pressing Ctrl+C stops rendering and lets FFmpeg finalize the partial file so its container remains readable. The CLI prints the partial output path and exits with status 130. Invalid activity, layout, widget, size, profile, font, or video inputs are reported before FFmpeg is started. FFmpeg failures include its diagnostic text. Other errors are printed to stderr and exit with status 2. An existing output is replaced only after static input and XML validation succeeds. Keep the output path separate from all input files.

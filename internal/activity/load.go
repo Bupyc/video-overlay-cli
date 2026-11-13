@@ -8,18 +8,28 @@ import (
 	"strings"
 )
 
-func Load(path string) (*Activity, error) {
+func Load(path string, customFields ...string) (*Activity, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open activity %q: %w", path, err)
 	}
 	defer f.Close()
 
+	indices := make(map[string]int, len(customFields))
+	for _, name := range customFields {
+		if _, ok := indices[name]; !ok {
+			indices[name] = len(indices)
+		}
+	}
+
 	var a *Activity
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".fit":
-		a, err = loadFIT(f)
+		a, err = loadFIT(f, indices)
 	case ".gpx":
+		if len(indices) != 0 {
+			return nil, fmt.Errorf("custom FIT fields require a .fit activity")
+		}
 		a, err = loadGPX(f)
 	default:
 		return nil, fmt.Errorf("unsupported activity format %q: use .fit or .gpx", filepath.Ext(path))
